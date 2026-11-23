@@ -9,6 +9,7 @@
 #                                 takes over ports 22 and 23.
 #   sudo bash setup.sh status     what is running, and the last shipments.
 #   sudo bash setup.sh update     pull the latest code and restart services.
+#   sudo bash setup.sh set-db     enter a new DATABASE_URL (e.g. after a password reset).
 #
 # Before stage 1, allow the new ports in the Azure firewall (Cloud Shell):
 #   az vm open-port -g sentinel-bd -n sentinel-sensor-1 --port 23,2222,2323,22222 --priority 1010
@@ -58,6 +59,44 @@ write_sshd_conf() {
   systemctl restart ssh.service
 }
 
+# Ask for DATABASE_URL, check its shape, and prove it connects. On any
+# failure the file is removed, so the next run asks again. The URL (which
+# contains the password) is never printed.
+configure_database() {
+  mkdir -p "$ENV_DIR"
+  id sentinel >/dev/null 2>&1 || useradd --system --home "$DATA" --shell /usr/sbin/nologin sentinel
+  if [ ! -s "$ENV_FILE" ]; then
+    echo "Paste your Neon DATABASE_URL (starts with postgresql://), then press Enter."
+    echo "Nothing is shown while you paste. Paste it once only."
+    read -rsp "DATABASE_URL: " db_url < /dev/tty; echo
+    db_url="${db_url//$'\r'/}"
+    local schemes
+    schemes=$(grep -o '://' <<<"$db_url" | wc -l)
+    if [[ "$db_url" != postgres* || "$schemes" -ne 1 || "$db_url" =~ [[:space:]] || "$db_url" == *"'"* ]]; then
+      die "That doesn't look like one PostgreSQL URL (was it pasted twice?). Run the same command again."
+    fi
+    umask 077
+    # Quoted: Neon URLs contain '&', which a shell would otherwise act on.
+    printf "DATABASE_URL='%s'\n" "$db_url" > "$ENV_FILE"
+    umask 022
+  fi
+  chown root:sentinel "$ENV_FILE" && chmod 640 "$ENV_FILE"
+  if ! sudo -u sentinel bash -c "set -a; . '$ENV_FILE'; cd '$APP' && exec .venv/bin/python -c '
+import re, sys
+try:
+    from sentinel.db import init_db
+    init_db()
+except Exception as exc:
+    text = re.sub(r\"://[^@/\\s]+@\", \"://***@\", str(exc).splitlines()[0])
+    text = re.sub(r\"npg_[A-Za-z0-9]+\", \"***\", text)
+    sys.exit(f\"{type(exc).__name__}: {text[:300]}\")
+print(\"database reachable\")
+'"; then
+    rm -f "$ENV_FILE"
+    die "Could not connect with that URL (details above, password hidden). Run the same command again to re-enter it."
+  fi
+}
+
 stage_install() {
   say "Swap (the VM has 1 GB of RAM)"
   if ! swapon --show | grep -q .; then
@@ -93,21 +132,9 @@ stage_install() {
   "$APP/.venv/bin/pip" install -q -r "$APP/requirements.txt"
 
   say "Database connection"
-  mkdir -p "$ENV_DIR"
-  if [ ! -s "$ENV_FILE" ]; then
-    echo "Paste your Neon DATABASE_URL (starts with postgresql://). It will not be shown."
-    read -rsp "DATABASE_URL: " db_url < /dev/tty; echo
-    [[ "$db_url" == postgres* ]] || die "That does not look like a PostgreSQL URL."
-    [[ "$db_url" != *"'"* ]] || die "The URL contains a quote character; check what you pasted."
-    umask 077
-    # Quoted: Neon URLs contain '&', which a shell would otherwise act on.
-    printf "DATABASE_URL='%s'\n" "$db_url" > "$ENV_FILE"
-    umask 022
-  fi
-  chown root:sentinel "$ENV_FILE" && chmod 640 "$ENV_FILE"
-  sudo -u sentinel bash -c "set -a; . '$ENV_FILE'; cd '$APP' && exec .venv/bin/python -c \
-    'from sentinel.db import init_db; init_db(); print(\"database reachable\")'" \
-    || die "Could not reach the database. Check the URL in $ENV_FILE."
+  configure_database
+  # Mark that stage 1 got this far (used by `set-db`).
+  touch "$ENV_DIR/.installed"
 
   say "Data folders"
   mkdir -p "$DATA/cowrie/log" "$DATA/cowrie/downloads" "$DATA/state"
@@ -197,5 +224,8 @@ case "${1:-install}" in
   finalize) stage_finalize ;;
   status)   stage_status ;;
   update)   stage_update ;;
-  *) die "Unknown command '$1'. Use: install | finalize | status | update" ;;
+  set-db)   rm -f "$ENV_FILE"; configure_database
+            systemctl restart sentinel-hunter.service 2>/dev/null || true
+            say "Database updated." ;;
+  *) die "Unknown command '$1'. Use: install | finalize | status | update | set-db" ;;
 esac

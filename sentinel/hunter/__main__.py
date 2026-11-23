@@ -54,7 +54,12 @@ def main(argv: list[str] | None = None) -> int:
         return recheck(dry_run=args.dry_run)
 
     if args.command == "stream":
-        asyncio.run(__import__("sentinel.hunter.stream", fromlist=["run"]).run(args.url))
+        from sentinel.hunter.stream import run
+
+        try:
+            asyncio.run(run(args.url))
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass  # a normal stop (systemd restart or Ctrl+C), not a failure
         return 0
 
     from sentinel.ingest import rescore_all, run_collector

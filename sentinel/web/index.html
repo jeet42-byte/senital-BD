@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinel-BD</title>
+  <meta name="description" content="Open threat intelligence for Bangladesh: malicious IPs, domains, URLs and hashes, scored and ready to block.">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23006a4e'/%3E%3Ccircle cx='14' cy='16' r='7' fill='%23f42a41'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script type="module" src="/assets/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#explorer">Skip to the threat explorer</a>
+
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" class="brand-field"/>
+        <circle cx="14" cy="16" r="7" class="brand-sun"/>
+        <path d="M23 9.5a9.5 9.5 0 0 1 0 13" class="brand-wave"/>
+        <path d="M26.5 6.5a14 14 0 0 1 0 19" class="brand-wave brand-wave-2"/>
+      </svg>
+      <div class="brand-text">
+        <span class="brand-name">Sentinel<span class="brand-sep">·</span>BD</span>
+        <span class="brand-bn" lang="bn">বাংলাদেশ সাইবার হুমকি পর্যবেক্ষণ</span>
+      </div>
+    </div>
+    <div class="status" id="status" aria-live="polite">
+      <span class="status-dot" data-state="loading"></span>
+      <span class="status-text">Connecting…</span><span class="status-detail"></span>
+    </div>
+  </header>
+
+  <main>
+    <section class="lookup" aria-labelledby="lookup-label">
+      <form id="lookup-form" role="search" autocomplete="off">
+        <label id="lookup-label" for="lookup-input" class="eyebrow">Is it malicious?</label>
+        <div class="lookup-box">
+          <svg class="lookup-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+          <input id="lookup-input" name="value" spellcheck="false" maxlength="2048"
+                 placeholder="Paste an IP, domain, URL or hash. Defanged is fine: hxxp://evil[.]com">
+          <kbd class="lookup-kbd" aria-hidden="true">/</kbd>
+          <button type="submit" class="btn btn-primary">Check</button>
+        </div>
+      </form>
+      <div class="lookup-examples" id="lookup-examples"></div>
+      <div id="verdict" class="verdict" hidden></div>
+      <div class="intro">
+        <p><strong>Sentinel-BD</strong> collects public threat feeds every 6 hours, scores every
+          indicator by how many sources agree and how fresh it is, and flags anything aimed at
+          Bangladesh: <span lang="bn">.bd</span> sites, fake bKash and bank pages, and Bangladeshi networks.</p>
+        <p>Everything here is clickable. Pick a day, a brand or a malware family and the explorer follows.</p>
+        <div class="intro-steps"><span><b>1</b> collect</span><span><b>2</b> clean</span><span><b>3</b> score</span><span><b>4</b> tag BD</span><span><b>5</b> block</span></div>
+      </div>
+    </section>
+
+    <section class="readout" id="readout" aria-label="Totals"></section>
+
+    <section class="row row-pulse">
+      <article class="panel" aria-labelledby="pulse-title">
+        <header class="panel-head">
+          <div>
+            <h2 id="pulse-title">Threat pulse</h2>
+            <p class="sub">New indicators per day, last 30 days. Click a day to inspect it.</p>
+          </div>
+          <div class="pulse-legend" id="pulse-summary"></div>
+        </header>
+        <div class="pulse" id="pulse"></div>
+      </article>
+
+      <article class="panel" aria-labelledby="brands-title">
+        <header class="panel-head">
+          <div>
+            <h2 id="brands-title">Who's being impersonated</h2>
+            <p class="sub">Lookalike domains and URLs aimed at Bangladeshi brands.</p>
+          </div>
+        </header>
+        <div id="brands" class="brands"></div>
+      </article>
+    </section>
+
+    <section class="row row-explorer">
+      <article class="panel explorer" id="explorer" aria-labelledby="explorer-title">
+        <header class="panel-head explorer-head">
+          <h2 id="explorer-title">Threat explorer</h2>
+          <div class="seg" role="group" aria-label="Scope">
+            <button type="button" data-scope="all">All threats</button>
+            <button type="button" data-scope="bd">Aimed at Bangladesh</button>
+          </div>
+          <div class="seg seg-quiet" role="group" aria-label="Sort">
+            <button type="button" data-sort="score">Highest score</button>
+            <button type="button" data-sort="newest">Newest</button>
+          </div>
+        </header>
+
+        <div class="facets" id="facets"></div>
+
+        <div class="explorer-tools">
+          <label class="search">
+            <span class="visually-hidden">Filter by value</span>
+            <input id="search" type="search" spellcheck="false" placeholder="Filter values: bkash, .top, 103.4.">
+          </label>
+          <div class="active" id="active-filters" aria-live="polite"></div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="threats" id="threats">
+            <thead>
+              <tr>
+                <th scope="col" class="c-score">Score</th>
+                <th scope="col" class="c-type">Type</th>
+                <th scope="col" class="c-value">Indicator <span class="muted">(defanged)</span></th>
+                <th scope="col" class="c-ctx">Context</th>
+                <th scope="col" class="c-src">Seen by</th>
+                <th scope="col" class="c-time">Last seen</th>
+              </tr>
+            </thead>
+            <tbody id="threats-body"></tbody>
+          </table>
+        </div>
+
+        <footer class="pager">
+          <span id="page-info" class="muted"></span>
+          <div class="pager-buttons">
+            <button type="button" class="btn btn-ghost" id="prev" aria-label="Previous page">←</button>
+            <button type="button" class="btn btn-ghost" id="next" aria-label="Next page">→</button>
+          </div>
+          <span class="keys muted"><kbd>j</kbd><kbd>k</kbd> move · <kbd>↵</kbd> open · <kbd>/</kbd> lookup</span>
+        </footer>
+      </article>
+
+      <aside class="panel stream" aria-labelledby="stream-title">
+        <header class="panel-head">
+          <div>
+            <h2 id="stream-title">Latest arrivals</h2>
+            <p class="sub" id="stream-sub">Newest first</p>
+          </div>
+        </header>
+        <ol class="stream-list" id="stream"></ol>
+      </aside>
+    </section>
+
+    <section class="row row-tools">
+      <article class="panel builder" aria-labelledby="builder-title">
+        <header class="panel-head">
+          <div>
+            <h2 id="builder-title">Build a blocklist</h2>
+            <p class="sub">Tune it, then paste the URL into your firewall. It refreshes itself.</p>
+          </div>
+        </header>
+        <div class="builder-grid">
+          <div class="builder-controls">
+            <div class="field">
+              <span class="field-label">Block</span>
+              <div class="seg" role="group" aria-label="Indicator type" id="builder-kind">
+                <button type="button" data-kind="ip">IPs</button>
+                <button type="button" data-kind="domain">Domains</button>
+                <button type="button" data-kind="url">URLs</button>
+                <button type="button" data-kind="hash">Hashes</button>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="builder-score">Minimum score <output id="builder-score-out">50</output></label>
+              <input type="range" id="builder-score" min="0" max="100" step="5" value="50">
+              <div class="range-scale"><span>block more</span><span>block less</span></div>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="builder-bd">
+              <span class="switch-track" aria-hidden="true"></span>
+              Only threats aimed at Bangladesh
+            </label>
+          </div>
+          <div class="builder-out">
+            <div class="builder-count"><span id="builder-count" class="num">–</span> <span class="muted" id="builder-count-label">entries</span></div>
+            <ul class="builder-sample" id="builder-sample"></ul>
+          </div>
+        </div>
+        <div class="feed-url">
+          <input id="builder-url" readonly aria-label="Feed URL">
+          <button type="button" class="btn" id="builder-copy">Copy URL</button>
+        </div>
+        <div class="vendors" role="tablist" id="vendor-tabs"></div>
+        <pre class="snippet" id="vendor-snippet" tabindex="0"></pre>
+      </article>
+
+      <article class="panel health" aria-labelledby="health-title">
+        <header class="panel-head">
+          <div>
+            <h2 id="health-title">Pipeline</h2>
+            <p class="sub">Each feed is collected every 6 hours.</p>
+          </div>
+        </header>
+        <ul class="health-list" id="health"></ul>
+        <dl class="mix" id="mix"></dl>
+      </article>
+    </section>
+
+    <footer class="foot">
+      <p>Sources: abuse.ch Feodo Tracker, URLhaus and ThreatFox, OpenPhish, and APNIC for Bangladeshi IP space.
+        Malicious values are shown defanged and are never links. <a href="/docs">API docs</a></p>
+    </footer>
+  </main>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+    <div class="drawer-inner" id="drawer-body"></div>
+  </aside>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

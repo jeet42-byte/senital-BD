@@ -5,8 +5,27 @@ indicators of compromise (malicious IPs, domains, URLs and file hashes) from pub
 feeds, scores how trustworthy each one is, flags those that concern Bangladesh, and
 publishes blocklists that firewalls, DNS servers and SIEMs can use directly.
 
-> **Status: Phase 1 (platform core) is complete.** Phishing-domain hunting (Phase 2) and
-> the honeypot sensors (Phase 3) are next. See [Roadmap](#roadmap).
+> **Status: Phase 1 (platform core) and the dashboard are complete.** Phishing-domain
+> hunting (Phase 2) and the honeypot sensors (Phase 3) are next. See [Roadmap](#roadmap).
+
+## Dashboard
+
+One app serves the dashboard, the API and the feeds. Open `/` after starting it.
+
+- **Lookup:** paste any IP, domain, URL or hash (defanged is fine) and get a verdict with a
+  score ring. Press `/` from anywhere to jump to it.
+- **Everything filters the explorer:** a day in the 30-day threat pulse, an impersonated
+  brand (bKash, Nagad, banks), a malware family, a severity, a source. Filters live in the
+  URL, so a view can be shared.
+- **"Why this score?":** every indicator opens a panel that shows how its score was worked
+  out (each source's weight, freshness decay, Bangladesh boost) and where it was seen.
+- **Blocklist builder:** choose a type, drag the score threshold, see how many entries a
+  feed would hold, and copy ready-made steps for pfSense, FortiGate, Palo Alto, MikroTik,
+  BIND, Pi-hole or a STIX-capable SIEM.
+- **Keyboard:** `j` / `k` move through threats, `Enter` opens one, `Esc` closes.
+- **Safe by construction:** malicious values are shown defanged, inserted only as text,
+  and never become links; the page runs under a strict Content-Security-Policy with no
+  third-party scripts.
 
 ---
 
@@ -94,6 +113,9 @@ python -m pytest -q
 | `GET /api/v1/feed-runs` | Health of each collector run |
 | `GET /feeds/{ip,domain,url,hash}.txt?min_score=50&bd_only=false` | Plain blocklists |
 | `GET /feeds/rpz.zone` | DNS firewall zone |
+| `GET /feeds/mikrotik.rsc` | RouterOS address-list script |
+| `GET /api/v1/explain?type=&value=` | Step-by-step score breakdown |
+| `GET /api/v1/feed-preview?kind=&min_score=&bd_only=` | Size of a feed before subscribing |
 | `GET /feeds/stix.json` | STIX 2.1 bundle |
 
 The API is **read-only**. Data enters only through the ingest job, so the public
@@ -106,7 +128,7 @@ service has no write endpoints to attack.
 | **pfSense / OPNsense** | pfBlockerNG → IP → IPv4 → add list | `https://<host>/feeds/ip.txt` |
 | **FortiGate** | Security Fabric → External Connectors → Threat Feeds → IP Address / Domain Name | `/feeds/ip.txt`, `/feeds/domain.txt` |
 | **Palo Alto** | Objects → External Dynamic Lists (IP / Domain / URL) | `/feeds/ip.txt`, `/feeds/domain.txt`, `/feeds/url.txt?strip_scheme=true` |
-| **MikroTik** | `/tool fetch` + address-list script | `/feeds/ip.txt` |
+| **MikroTik** | `/tool fetch` + `/import` on a schedule | `/feeds/mikrotik.rsc` |
 | **BIND / Unbound** | Response Policy Zone | `/feeds/rpz.zone` |
 | **Pi-hole** | Adlists | `/feeds/domain.txt` |
 | **MISP / OpenCTI / Splunk** | STIX import | `/feeds/stix.json` |
@@ -119,8 +141,10 @@ Add `?bd_only=true` for threats aimed at Bangladesh only, or raise `min_score` t
 2. **Collection:** add repository secrets `DATABASE_URL` and `ABUSECH_AUTH_KEY` (free at
    [auth.abuse.ch](https://auth.abuse.ch)). The workflow `.github/workflows/ingest.yml`
    then runs every 6 hours.
-3. **API:** deploy to Render (or any Python host) with
-   `uvicorn sentinel.api.main:app --host 0.0.0.0 --port $PORT` and the same `DATABASE_URL`.
+3. **Dashboard + API:** on [Render](https://render.com) choose **New → Blueprint**, pick this
+   repository (it reads `render.yaml`), and paste the same `DATABASE_URL` when asked.
+   Any other Python host works too:
+   `uvicorn sentinel.api.main:app --host 0.0.0.0 --port $PORT`.
 
 ## Project layout
 
@@ -133,8 +157,9 @@ sentinel/
   scoring.py      confidence model
   ingest.py       pipeline + CLI
   exporters.py    plain text, RPZ, STIX 2.1
-  api/            FastAPI app
-tests/            60 tests with sample data from each feed
+  api/            FastAPI app (dashboard, API, feeds)
+  web/            dashboard: index.html + assets/app.js, app.css (no build step)
+tests/            tests with sample data from each feed
 ```
 
 ## Roadmap
@@ -143,7 +168,7 @@ tests/            60 tests with sample data from each feed
 - [ ] **Phase 2, phishing hunter:** live CertStream monitoring for bKash, Nagad and bank lookalike domains, with screenshots and visual similarity checks
 - [ ] **Phase 3, honeynet:** Cowrie and Dionaea sensors producing first-hand attack data
 - [ ] **Phase 4, correlation:** link phishing domains, honeypot attackers and feed indicators through shared infrastructure; TAXII 2.1 server
-- [ ] **Phase 5, dashboard:** Next.js attack map, trends and lookup UI
+- [x] **Dashboard:** lookup, threat pulse, impersonated brands, explorer, score breakdown, blocklist builder
 - [ ] More feeds: AlienVault OTX, CISA KEV, MalwareBazaar, PhishTank
 
 ## Ethics

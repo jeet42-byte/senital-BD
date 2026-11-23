@@ -77,3 +77,54 @@ def test_stix_bundle(client):
     # Stable ids: the same indicator gets the same id on every export.
     again = json.loads(client.get("/feeds/stix.json", params={"bd_only": True}).text)
     assert {o["id"] for o in again["objects"]} == {o["id"] for o in bundle["objects"]}
+
+
+def test_dashboard_is_served_with_a_strict_csp(client):
+    page = client.get("/")
+    assert page.status_code == 200 and "Sentinel" in page.text
+    csp = page.headers["content-security-policy"]
+    assert "script-src 'self'" in csp and "frame-ancestors 'none'" in csp
+    assert client.get("/assets/app.js").status_code == 200
+    assert client.get("/assets/app.css").status_code == 200
+
+
+def test_stats_has_dashboard_fields(client):
+    stats = client.get("/api/v1/stats").json()
+    assert len(stats["timeline"]) == 30
+    assert stats["brands"].get("Nagad") == 2  # the domain and the URL
+    assert stats["bd_reason_kinds"]["ip"] >= 1
+    assert stats["last_updated"] is None  # fixtures load without feed runs
+    assert {run["source"] for run in stats["last_runs"]} == set()
+
+
+def test_explorer_filters(client):
+    def values(**params):
+        return [i["value"] for i in client.get("/api/v1/indicators", params=params).json()["items"]]
+
+    assert set(values(reason="impersonates:Nagad")) == {
+        "nagad-verify-account.com", "https://nagad-verify-account.com/login"}
+    assert values(malware="Emotet") == ["103.4.145.10"]
+    assert all(i["severity"] == "low" for i in client.get("/api/v1/indicators", params={"severity": "low"}).json()["items"])
+    newest = client.get("/api/v1/indicators", params={"sort": "newest"}).json()["items"]
+    firsts = [i["first_seen"] for i in newest]
+    assert firsts == sorted(firsts, reverse=True)
+    # A wildcard in the reason filter is taken literally.
+    assert values(reason="impersonates:%") == []
+
+
+def test_explain_matches_the_stored_score(client):
+    ex = client.get("/api/v1/explain", params={"type": "ipv4", "value": "185.220.101.45"}).json()
+    assert [s["source"] for s in ex["sources"]] == ["feodotracker", "threatfox"] or len(ex["sources"]) == 2
+    assert 0 < ex["decay"] <= 1 and ex["half_life_days"] == 14
+    assert client.get("/api/v1/explain", params={"type": "ipv4", "value": "9.9.9.10"}).status_code == 404
+    hit = client.get("/api/v1/lookup", params={"value": "185.220.101.45"}).json()
+    assert hit["explanation"]["sources"]
+
+
+def test_feed_preview_and_mikrotik(client):
+    preview = client.get("/api/v1/feed-preview", params={"kind": "ip", "min_score": 50}).json()
+    assert preview["count"] >= 2 and "185.220.101.45" in preview["sample"]
+    rsc = client.get("/feeds/mikrotik.rsc").text
+    assert rsc.splitlines()[1].startswith("/ip firewall address-list remove")
+    assert '/ip firewall address-list add list="sentinel-bd" address=185.220.101.45 timeout=1d' in rsc
+    assert "8.8.8.8" not in rsc

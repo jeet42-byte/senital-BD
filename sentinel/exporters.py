@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, noload, selectinload
 
 from sentinel import __version__
 from sentinel.allowlist import is_allowlisted_domain, is_allowlisted_ip
@@ -37,10 +37,14 @@ def select_indicators(
     min_score: int = 50,
     bd_only: bool = False,
     limit: int | None = None,
+    with_sightings: bool = False,
 ) -> list[Indicator]:
     limit = min(limit or get_settings().FEED_MAX_ROWS, get_settings().FEED_MAX_ROWS)
     query = (
         select(Indicator)
+        # Plain-text feeds only need the values; loading every sighting for
+        # 50,000 rows would multiply the work for nothing.
+        .options(selectinload(Indicator.sightings) if with_sightings else noload(Indicator.sightings))
         .where(Indicator.type.in_([t.value for t in types]), Indicator.score >= min_score)
         .order_by(Indicator.score.desc(), Indicator.last_seen.desc())
     )
@@ -69,6 +73,21 @@ def to_plain_text(indicators: Sequence[Indicator], strip_scheme: bool = False) -
             value = value.split("://", 1)[1]
         lines.append(value)
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def to_mikrotik(ips: Sequence[Indicator], list_name: str = "sentinel-bd") -> str:
+    """RouterOS script: replace the address list. Values are validated IPv4,
+    so nothing from a feed can inject RouterOS commands."""
+    lines = [
+        "# Sentinel-BD address list for MikroTik RouterOS",
+        f'/ip firewall address-list remove [find list="{list_name}"]',
+    ]
+    lines += [
+        f'/ip firewall address-list add list="{list_name}" address={i.value} timeout=1d'
+        for i in ips
+        if i.type == IndicatorType.IPV4
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def to_rpz(domains: Sequence[Indicator], now: datetime | None = None) -> str:

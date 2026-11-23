@@ -5,8 +5,8 @@ indicators of compromise (malicious IPs, domains, URLs and file hashes) from pub
 feeds, scores how trustworthy each one is, flags those that concern Bangladesh, and
 publishes blocklists that firewalls, DNS servers and SIEMs can use directly.
 
-> **Status: Phase 1 (platform core), the dashboard and Phase 2 (phishing hunter) are
-> complete.** The honeypot sensors (Phase 3) are next. See [Roadmap](#roadmap).
+> **Status: Phases 1–3 are built:** platform core, dashboard, phishing hunter, and the
+> honeypot sensor kit. See [Roadmap](#roadmap).
 
 ## Dashboard
 
@@ -112,6 +112,35 @@ Live mode reads a [CertStream](https://github.com/d-Rickyy-b/certstream-server-g
 websocket and checks every new certificate as it is logged (about 0.1 ms per name).
 It runs on the Phase 3 server.
 
+## Honeypot sensor (Phase 3)
+
+One small Ubuntu VM runs Sentinel-BD's own sensors:
+
+- **Cowrie** SSH and Telnet honeypot on ports 22 and 23. It records the IPs, usernames,
+  passwords and commands of attackers who try to log in, and captures the files they
+  download. Attackers get a fake shell, never the real system.
+- **Live phishing hunter**: a local certstream-server-go feeds every new TLS certificate
+  to the lookalike detector.
+- **Shipper** (every 5 minutes): new honeypot sessions become indicators (attacker IP
+  60–95 by behaviour, download URL 90, file hash 95) and daily statistics for the
+  dashboard's Honeypot panel. Port scans that never try to log in are ignored.
+
+```bash
+# Cloud Shell: open the ports (Azure's firewall)
+az vm open-port -g sentinel-bd -n sentinel-sensor-1 --port 23,2222,2323,22222 --priority 1010
+
+# On the VM
+curl -fsSLO https://raw.githubusercontent.com/jeet42-byte/senital-BD/main/deploy/setup.sh
+sudo bash setup.sh            # stage 1: everything installed; admin SSH on 22 and 22222
+ssh -p 22222 azureuser@<ip>   # from another terminal: prove the admin port works
+sudo bash /opt/sentinel-bd/deploy/setup.sh finalize   # honeypot takes 22 and 23
+sudo bash /opt/sentinel-bd/deploy/setup.sh status
+```
+
+Safety: the real SSH accepts keys only, on a non-standard port; automatic security updates
+are on; containers are memory-capped; the certificate stream listens on localhost only;
+captured files are deleted after 7 days and logs after 14.
+
 ## Quick start
 
 ```bash
@@ -191,6 +220,8 @@ sentinel/
   allowlist.py    never-block lists for the domain/IP feeds
   bd.py           Bangladesh relevance and APNIC IP ranges
   hunter/         phishing hunter: detect.py, crtsh.py, stream.py
+  honeypot/       Cowrie log parsing and shipping
+deploy/           sensor VM kit: setup.sh, docker-compose.yml, systemd units
   scoring.py      confidence model
   ingest.py       pipeline + CLI
   exporters.py    plain text, RPZ, STIX 2.1
@@ -204,7 +235,8 @@ tests/            tests with sample data from each feed
 - [x] **Phase 1, platform core:** 4 feeds, normalisation, scoring, Bangladesh tagging, API, firewall/RPZ/STIX feeds
 - [x] **Phase 2, phishing hunter:** lookalike detection (typos, digit swaps, homoglyphs, subdomain abuse), crt.sh polling every 3 hours, live CertStream mode
 - [ ] Phase 2b: screenshot suspected sites and compare them visually with the real login pages
-- [ ] **Phase 3, honeynet:** Cowrie and Dionaea sensors producing first-hand attack data
+- [x] **Phase 3, honeynet:** Cowrie SSH/Telnet sensor, live certificate stream, shipper and dashboard panel
+- [ ] More sensors: Dionaea (SMB/HTTP malware capture), a fake bKash login page
 - [ ] **Phase 4, correlation:** link phishing domains, honeypot attackers and feed indicators through shared infrastructure; TAXII 2.1 server
 - [x] **Dashboard:** lookup, threat pulse, impersonated brands, explorer, score breakdown, blocklist builder
 - [ ] More feeds: AlienVault OTX, CISA KEV, MalwareBazaar, PhishTank

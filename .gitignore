@@ -7,3 +7,4 @@ venv/
 *.db-journal
 .pytest_cache/
 data/bd_ipv4.txt
+deploy/.env

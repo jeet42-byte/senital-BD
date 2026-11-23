@@ -841,6 +841,64 @@ function initBuilder() {
   updateBuilder();
 }
 
+/* ------------------------------------------------------------- honeypot */
+
+async function loadHoneypot() {
+  const root = $("#honeypot-body");
+  let hp;
+  try {
+    hp = await api("/api/v1/honeypot", { days: 30 });
+  } catch {
+    return;
+  }
+  clear(root);
+  const live = $("#hp-live");
+  const fresh = hp.last_report && Date.now() - new Date(hp.last_report).getTime() < 30 * 60 * 1000;
+  live.className = `hp-live ${fresh ? "on" : "off"}`;
+  live.textContent = hp.last_report ? (fresh ? "● live" : `last report ${ago(hp.last_report)}`) : "";
+
+  if (!hp.sessions) {
+    root.append(h("p", { class: "empty hp-wide", style: { gridColumn: "1 / -1" } },
+      h("strong", {}, "The sensor hasn't reported yet. "),
+      "Once the honeypot server is running, attackers usually find it within minutes, and their passwords, commands and downloads will appear here."));
+    return;
+  }
+
+  root.append(h("div", { class: "hp-figures" },
+    figure(hp.sessions, "connections"),
+    figure(hp.login_attempts, "passwords tried"),
+    figure(hp.attackers, "attacking IPs")));
+
+  const list = (title, items, render) => h("div", { class: "hp-list" }, h("h3", {}, title),
+    items.length ? h("ol", {}, items.map((item) => h("li", {}, render(item), h("span", { class: "n" }, fmt(item.count)))))
+      : h("p", { class: "muted" }, "None yet"));
+  const code = (text) => h("code", { title: text }, text);
+
+  root.append(
+    list("Passwords tried", hp.passwords.slice(0, 8), (i) => code(i.value)),
+    list("Usernames tried", hp.usernames.slice(0, 8), (i) => code(i.value)),
+    list("Top attackers", hp.top_attackers.slice(0, 8), (i) => h("button", {
+      type: "button", class: "code-btn", title: "Check this IP",
+      onclick: () => { $("#lookup-input").value = i.value; runLookup(i.value); scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" }); },
+    }, code(defang("ipv4", i.value)))),
+  );
+  root.append(h("div", { class: "hp-list hp-wide" }, h("h3", {}, "Commands run after a fake login"),
+    hp.commands.length ? h("ol", {}, hp.commands.map((i) => h("li", {}, code(defangText(i.value)), h("span", { class: "n" }, fmt(i.count)))))
+      : h("p", { class: "muted" }, "No attacker has got past the login yet.")));
+}
+
+/** Defang every URL inside free text, e.g. an attacker's wget command. */
+function defangText(text) {
+  return text.replace(/\b(https?|ftp):\/\/([^\s/'"]+)/gi, (_, scheme, host) =>
+    `${scheme.toLowerCase().replace(/^http/, "hxxp").replace(/^ftp/, "fxp")}://${host.replace(/\.(?=[^.]*$)/, "[.]")}`);
+}
+
+function figure(value, label) {
+  const num = h("span", { class: "num" }, "0");
+  animateNumber(num, value);
+  return h("div", { class: "hp-figure" }, num, h("span", {}, label));
+}
+
 /* --------------------------------------------------------------- health */
 
 function renderHealth() {
@@ -936,9 +994,10 @@ function init() {
   loadStats();
   loadTable();
   loadStream();
+  loadHoneypot();
   renderExamples();
   // Collection runs every 6 hours; refreshing every 5 minutes is plenty.
-  setInterval(() => { loadStats(); loadStream(); }, 5 * 60 * 1000);
+  setInterval(() => { loadStats(); loadStream(); loadHoneypot(); }, 5 * 60 * 1000);
 }
 
 init();

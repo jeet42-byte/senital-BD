@@ -12,6 +12,7 @@ Read-only: data only enters through the ingest job.
   GET /api/v1/stats               counts, 30-day timeline, impersonated brands
   GET /api/v1/feed-preview        size of a feed before you subscribe to it
   GET /api/v1/feed-runs           pipeline health
+  GET /api/v1/honeypot            what attackers did on Sentinel-BD's own sensors
   GET /feeds/{ip|domain|url|hash}.txt   blocklists for firewalls
   GET /feeds/rpz.zone             DNS firewall zone
   GET /feeds/mikrotik.rsc         RouterOS address-list script
@@ -37,9 +38,11 @@ from sentinel import __version__
 from sentinel.api.schemas import (
     FeedPreview,
     FeedRunOut,
+    HoneypotStats,
     IndicatorOut,
     IndicatorPage,
     LookupResult,
+    Ranked,
     ScoreExplanation,
     Stats,
     TimelinePoint,
@@ -55,7 +58,7 @@ from sentinel.exporters import (
     to_stix_bundle,
 )
 from sentinel.indicators import IndicatorType, guess_type, normalize
-from sentinel.models import FeedRun, Indicator, Sighting
+from sentinel.models import FeedRun, HoneypotDaily, Indicator, Sighting
 from sentinel.scoring import Evidence, explain_score
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -296,6 +299,49 @@ def feed_preview(
     count = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     sample = select_indicators(session, FEED_TYPES[kind], min_score, bd_only, limit=5)
     return FeedPreview(kind=kind, count=count, sample=[row.value for row in sample])
+
+
+@app.get("/api/v1/honeypot", response_model=HoneypotStats)
+def honeypot(
+    session: SessionDep,
+    days: Annotated[int, Query(ge=1, le=90)] = 30,
+) -> HoneypotStats:
+    today = datetime.now(timezone.utc).date()
+    first = (today - timedelta(days=days - 1)).isoformat()
+    rows = session.execute(
+        select(HoneypotDaily.day, HoneypotDaily.kind, HoneypotDaily.value, HoneypotDaily.count)
+        .where(HoneypotDaily.day >= first)
+    ).all()
+
+    per_kind: dict[str, Counter[str]] = {}
+    per_day: Counter[str] = Counter()
+    for day, kind, value, count in rows:
+        per_kind.setdefault(kind, Counter())[value] += count
+        if kind == "session":
+            per_day[day] += count
+
+    def top(kind: str, n: int = 10) -> list[Ranked]:
+        return [Ranked(value=v, count=c) for v, c in per_kind.get(kind, Counter()).most_common(n)]
+
+    last = session.scalar(
+        select(func.max(FeedRun.finished_at)).where(FeedRun.source == "honeypot", FeedRun.ok.is_(True))
+    )
+    return HoneypotStats(
+        days=days,
+        sessions=sum(per_kind.get("session", Counter()).values()),
+        login_attempts=sum(per_kind.get("password", Counter()).values()),
+        attackers=len(per_kind.get("attacker", Counter())),
+        last_report=last,
+        timeline=[
+            TimelinePoint(day=d.isoformat(), count=per_day.get(d.isoformat(), 0))
+            for d in (today - timedelta(days=days - 1 - i) for i in range(days))
+        ],
+        protocols=dict(per_kind.get("protocol", Counter())),
+        usernames=top("username"),
+        passwords=top("password"),
+        commands=top("command", 8),
+        top_attackers=top("attacker", 8),
+    )
 
 
 @app.get("/api/v1/feed-runs", response_model=list[FeedRunOut])

@@ -1,0 +1,17 @@
+[Unit]
+Description=Sentinel-BD: ship new honeypot log lines to the database
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=sentinel
+EnvironmentFile=/etc/sentinel-bd/env
+WorkingDirectory=/opt/sentinel-bd
+ExecStart=/opt/sentinel-bd/.venv/bin/python -m sentinel.honeypot ship --log-dir /var/lib/sentinel-bd/cowrie/log --state /var/lib/sentinel-bd/state/ship-state.json
+MemoryMax=300M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/sentinel-bd/state
+ProtectHome=yes
+PrivateTmp=yes

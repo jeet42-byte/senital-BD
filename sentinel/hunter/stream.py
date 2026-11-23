@@ -16,8 +16,10 @@ Both CertStream message shapes are understood:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import signal
 import time
 from datetime import datetime, timezone
 
@@ -82,11 +84,27 @@ class StreamHunter:
 
 
 async def run(url: str) -> None:
-    import websockets
 
     init_db()
     hunter = StreamHunter()
     backoff = 1
+    # systemd stops the service with SIGTERM: cancel cleanly so the findings
+    # still in memory are written before exit.
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        with contextlib.suppress(NotImplementedError, RuntimeError):
+            loop.add_signal_handler(sig, task.cancel)
+    try:
+        await _loop(url, hunter, backoff)
+    finally:
+        written = hunter.flush()
+        log.info("stopping; wrote %d pending lookalikes", written)
+
+
+async def _loop(url: str, hunter: StreamHunter, backoff: int) -> None:
+    import websockets
+
     while True:
         try:
             async with websockets.connect(url, max_size=2**22, ping_interval=20) as socket:

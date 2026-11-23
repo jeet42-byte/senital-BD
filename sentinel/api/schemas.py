@@ -94,6 +94,25 @@ class FeedRunOut(BaseModel):
     error: str | None
 
 
+class Ranked(BaseModel):
+    value: str
+    count: int
+
+
+class HoneypotStats(BaseModel):
+    days: int
+    sessions: int
+    login_attempts: int
+    attackers: int
+    last_report: datetime | None
+    timeline: list[TimelinePoint]
+    protocols: dict[str, int]
+    usernames: list[Ranked]
+    passwords: list[Ranked]
+    commands: list[Ranked]
+    top_attackers: list[Ranked]
+
+
 class Stats(BaseModel):
     total: int
     bd_relevant: int

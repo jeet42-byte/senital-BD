@@ -1,0 +1,32 @@
+# Sentinel-BD sensor containers. Managed by deploy/setup.sh; ports come from
+# deploy/.env (written by setup.sh): 2222/2323 while you test, 22/23 after
+# `setup.sh finalize`.
+services:
+  cowrie:
+    image: cowrie/cowrie:latest
+    restart: unless-stopped
+    ports:
+      - "${COWRIE_SSH_PORT:-2222}:2222"
+      - "${COWRIE_TELNET_PORT:-2323}:2223"
+    environment:
+      COWRIE_TELNET_ENABLED: "yes"
+      COWRIE_HONEYPOT_HOSTNAME: "bd-web01"
+    volumes:
+      - /var/lib/sentinel-bd/cowrie/log:/cowrie/cowrie-git/var/log/cowrie
+      - /var/lib/sentinel-bd/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
+    mem_limit: 300m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  # Every new TLS certificate from the public CT logs, for the live phishing
+  # hunter. Reachable only from this machine.
+  certstream:
+    image: 0rickyy0/certstream-server-go:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    mem_limit: 300m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

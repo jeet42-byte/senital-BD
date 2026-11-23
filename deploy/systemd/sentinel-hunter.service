@@ -1,0 +1,20 @@
+[Unit]
+Description=Sentinel-BD live phishing hunter (CertStream)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=sentinel
+EnvironmentFile=/etc/sentinel-bd/env
+WorkingDirectory=/opt/sentinel-bd
+ExecStart=/opt/sentinel-bd/.venv/bin/python -m sentinel.hunter stream --url ws://127.0.0.1:8080/domains-only
+Restart=always
+RestartSec=30
+MemoryMax=300M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

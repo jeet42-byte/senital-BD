@@ -32,6 +32,9 @@ SOURCE_RELIABILITY: dict[str, float] = {
     # suspicion, not proof, so its weight is modest; its own 0-100 risk score
     # scales it further, and a feed confirming the domain lifts the total.
     "phishhunter": 0.65,
+    # Sentinel-BD's own sensors: a completed TCP session that tried to log in
+    # is first-hand evidence. The session's behaviour scales it further.
+    "honeypot": 0.90,
 }
 DEFAULT_RELIABILITY = 0.50
 

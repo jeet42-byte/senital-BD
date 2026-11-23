@@ -74,6 +74,20 @@ class Sighting(Base):
     indicator: Mapped[Indicator] = relationship(back_populates="sightings")
 
 
+class HoneypotDaily(Base):
+    """Per-day honeypot counts: sessions, attackers, usernames, passwords,
+    commands and protocols. Aggregates only; raw sessions are not stored."""
+
+    __tablename__ = "honeypot_daily"
+    __table_args__ = (UniqueConstraint("day", "kind", "value", name="uq_honeypot_daily"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD (UTC)
+    kind: Mapped[str] = mapped_column(String(16))
+    value: Mapped[str] = mapped_column(String(200))
+    count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class FeedRun(Base):
     __tablename__ = "feed_run"
 

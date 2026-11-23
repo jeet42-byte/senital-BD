@@ -68,6 +68,8 @@ class Sighting(Base):
     # Confidence the source itself gives (0-100), when it gives one.
     confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Why this source flagged it, when it says (e.g. the phishing hunter).
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     indicator: Mapped[Indicator] = relationship(back_populates="sightings")
 

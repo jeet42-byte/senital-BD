@@ -5,6 +5,8 @@ sqlalchemy==2.0.36
 psycopg[binary]==3.2.3      # PostgreSQL driver (Neon / production)
 httpx==0.28.1
 pydantic-settings==2.7.0
+tldextract==5.1.3           # registrable-domain parsing (bundled suffix list, no network)
+websockets==14.1            # live certificate stream (phishing hunter on a server)
 
 # Tests
 pytest==8.3.4

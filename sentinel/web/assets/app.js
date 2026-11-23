@@ -85,8 +85,8 @@ const SOURCES = {
   urlhaus: ["UH", "URLhaus"],
   threatfox: ["TF", "ThreatFox"],
   openphish: ["OP", "OpenPhish"],
+  phishhunter: ["PH", "Phishing hunter"],
   honeypot: ["HP", "Sentinel-BD honeypot"],
-  certstream: ["CT", "Phishing hunter"],
 };
 const sourceName = (key) => (SOURCES[key] || [key.slice(0, 2).toUpperCase(), key])[1];
 const sourceAbbr = (key) => (SOURCES[key] || [key.slice(0, 2).toUpperCase(), key])[0];
@@ -676,7 +676,9 @@ async function openDrawer(item, explanation = null) {
     h("table", { class: "sightings" },
       h("thead", {}, h("tr", {}, h("th", {}, "Source"), h("th", {}, "First"), h("th", {}, "Last"), h("th", {}, "Reference"))),
       h("tbody", {}, item.sightings.map((sg) => h("tr", {},
-        h("td", {}, sourceName(sg.source), sg.confidence != null ? h("div", { class: "muted" }, `confidence ${sg.confidence}%`) : null),
+        h("td", {}, sourceName(sg.source),
+          sg.confidence != null ? h("div", { class: "muted" }, `confidence ${sg.confidence}%`) : null,
+          sg.note ? h("div", { class: "sighting-note" }, sg.note) : null),
         h("td", {}, ago(sg.first_seen)),
         h("td", {}, ago(sg.last_seen)),
         h("td", {}, referenceLink(sg.reference))))))));
@@ -722,7 +724,7 @@ function referenceLink(ref) {
   if (!ref) return "–";
   try {
     const url = new URL(ref);
-    const trusted = ["abuse.ch", "openphish.com"].some((d) => url.hostname === d || url.hostname.endsWith(`.${d}`));
+    const trusted = ["abuse.ch", "openphish.com", "crt.sh"].some((d) => url.hostname === d || url.hostname.endsWith(`.${d}`));
     if (url.protocol === "https:" && trusted) {
       return h("a", { href: url.href, target: "_blank", rel: "noopener noreferrer" }, url.hostname);
     }

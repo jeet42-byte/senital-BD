@@ -5,8 +5,8 @@ indicators of compromise (malicious IPs, domains, URLs and file hashes) from pub
 feeds, scores how trustworthy each one is, flags those that concern Bangladesh, and
 publishes blocklists that firewalls, DNS servers and SIEMs can use directly.
 
-> **Status: Phase 1 (platform core) and the dashboard are complete.** Phishing-domain
-> hunting (Phase 2) and the honeypot sensors (Phase 3) are next. See [Roadmap](#roadmap).
+> **Status: Phase 1 (platform core), the dashboard and Phase 2 (phishing hunter) are
+> complete.** The honeypot sensors (Phase 3) are next. See [Roadmap](#roadmap).
 
 ## Dashboard
 
@@ -75,6 +75,42 @@ blocklist (score ≥ 50). Severity bands: high ≥ 80, medium ≥ 50, low below 
 | `impersonates:<brand>` | `bkash-reward-bd.top`, `dutchbangla-ibanking-login.xyz` (the real sites are never flagged) |
 | `ip:bd-space` | an IP in address space APNIC allocated to Bangladesh |
 | `geo:BD` | the source feed itself places it in Bangladesh |
+
+## Phishing hunter
+
+Global feeds rarely list fake bKash, Nagad or bank sites. Sentinel-BD finds them itself.
+Every TLS certificate is published in Certificate Transparency logs, and a phishing site
+needs one for its padlock, so lookalike domains show up there within minutes, often
+before the first victim gets a link.
+
+The detector (`sentinel/hunter/detect.py`) checks any hostname for imitation of 17
+Bangladeshi banks, MFS providers and telcos:
+
+| Technique | Example | Base score |
+|---|---|---|
+| Homoglyph (foreign letters that look Latin) | `bkаsh-login.com` (Cyrillic а) | 75 |
+| Digit swap | `bka5h.xyz`, `nag4d-app.top` | 60 |
+| Typosquat (one letter off) | `bkassh-login.com`, `gramenphone-offer.shop` | 55 |
+| Brand in front of another domain | `bkash.com.secure-login.top` | 50 |
+| Brand inside a new name | `bkash-reward-bd.top` | 40 |
+
+Phishing words (+15), cheap TLDs (+15), free hosting (+10) and long hyphenated names (+10)
+add to the base. Names scoring 55 or more are reported. The genuine domains are never
+flagged, and common names and words one letter from a brand ("Bikash", "Akash", "nagar")
+are excluded so that `bikashroy.com` or `ramnagar.com` don't raise alarms.
+
+A name alone is a suspicion, not proof, so hunter findings carry a modest weight (0.65).
+When a feed later confirms the same domain, the score rises.
+
+```bash
+python -m sentinel.hunter check bka5h.xyz bkash.com   # try the detector
+python -m sentinel.hunter crtsh                       # search crt.sh once (runs every 3 h on Actions)
+python -m sentinel.hunter stream --url ws://127.0.0.1:8080/domains-only   # live, on a server
+```
+
+Live mode reads a [CertStream](https://github.com/d-Rickyy-b/certstream-server-go)
+websocket and checks every new certificate as it is logged (about 0.1 ms per name).
+It runs on the Phase 3 server.
 
 ## Quick start
 
@@ -154,6 +190,7 @@ sentinel/
   indicators.py   types, refanging, normalisation, validation
   allowlist.py    never-block lists for the domain/IP feeds
   bd.py           Bangladesh relevance and APNIC IP ranges
+  hunter/         phishing hunter: detect.py, crtsh.py, stream.py
   scoring.py      confidence model
   ingest.py       pipeline + CLI
   exporters.py    plain text, RPZ, STIX 2.1
@@ -165,7 +202,8 @@ tests/            tests with sample data from each feed
 ## Roadmap
 
 - [x] **Phase 1, platform core:** 4 feeds, normalisation, scoring, Bangladesh tagging, API, firewall/RPZ/STIX feeds
-- [ ] **Phase 2, phishing hunter:** live CertStream monitoring for bKash, Nagad and bank lookalike domains, with screenshots and visual similarity checks
+- [x] **Phase 2, phishing hunter:** lookalike detection (typos, digit swaps, homoglyphs, subdomain abuse), crt.sh polling every 3 hours, live CertStream mode
+- [ ] Phase 2b: screenshot suspected sites and compare them visually with the real login pages
 - [ ] **Phase 3, honeynet:** Cowrie and Dionaea sensors producing first-hand attack data
 - [ ] **Phase 4, correlation:** link phishing domains, honeypot attackers and feed indicators through shared infrastructure; TAXII 2.1 server
 - [x] **Dashboard:** lookup, threat pulse, impersonated brands, explorer, score breakdown, blocklist builder

@@ -28,6 +28,10 @@ SOURCE_RELIABILITY: dict[str, float] = {
     "urlhaus": 0.85,
     "threatfox": 0.80,     # community submissions; also gives its own confidence
     "openphish": 0.75,
+    # Lookalike names found by Sentinel-BD itself. A name alone is a
+    # suspicion, not proof, so its weight is modest; its own 0-100 risk score
+    # scales it further, and a feed confirming the domain lifts the total.
+    "phishhunter": 0.65,
 }
 DEFAULT_RELIABILITY = 0.50
 

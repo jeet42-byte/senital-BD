@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from sentinel.bd import bd_reasons
 from sentinel.collectors import COLLECTORS, RawIndicator
-from sentinel.collectors.base import FeedError
+from sentinel.collectors.base import Collector, FeedError
 from sentinel.config import get_settings
 from sentinel.db import init_db, session_scope
 from sentinel.indicators import IndicatorType, normalize
@@ -74,6 +74,8 @@ def _merge(raws: Iterable[RawIndicator], now: datetime, stats: IngestStats) -> d
             current.confidence = max(current.confidence or 0, raw.confidence)
         current.malware = current.malware or raw.malware
         current.country = current.country or raw.country
+        current.extra_reasons = sorted(set(current.extra_reasons) | set(raw.extra_reasons))
+        current.note = current.note or raw.note
     return merged
 
 
@@ -126,7 +128,11 @@ def ingest_raw(
         indicator.tags = sorted(set(indicator.tags or []) | set(raw.tags))
         indicator.threat_type = indicator.threat_type or _clip(raw.threat_type, 64)
         indicator.malware = indicator.malware or _clip(raw.malware, 128)
-        reasons = set(indicator.bd_reasons or []) | set(bd_reasons(kind, value, raw.country))
+        reasons = (
+            set(indicator.bd_reasons or [])
+            | set(bd_reasons(kind, value, raw.country))
+            | set(raw.extra_reasons)
+        )
         indicator.bd_reasons = sorted(reasons)
         indicator.bd_relevant = bool(reasons)
 
@@ -135,7 +141,7 @@ def ingest_raw(
             indicator.sightings.append(
                 Sighting(
                     source=source, first_seen=raw.first_seen, last_seen=raw.last_seen,
-                    confidence=raw.confidence, reference=raw.reference,
+                    confidence=raw.confidence, reference=raw.reference, note=raw.note,
                 )
             )
         else:
@@ -143,6 +149,7 @@ def ingest_raw(
             sighting.last_seen = max(as_utc(sighting.last_seen), raw.last_seen)
             sighting.confidence = raw.confidence if raw.confidence is not None else sighting.confidence
             sighting.reference = raw.reference or sighting.reference
+            sighting.note = raw.note or sighting.note
 
         rescore(indicator, now)
 
@@ -160,9 +167,15 @@ def rescore_all(session: Session, now: datetime | None = None) -> int:
     return count
 
 
-def run_collector(name: str, client: httpx.Client | None = None, text: str | None = None) -> FeedRun:
-    """Run one collector and record the outcome. Never raises for feed errors."""
-    collector = COLLECTORS[name]
+def run_collector(
+    collector: str | Collector, client: httpx.Client | None = None, text: str | None = None
+) -> FeedRun:
+    """Run one collector (by name or instance) and record the outcome.
+
+    Never raises for feed errors: they are logged and stored on the run.
+    """
+    collector = COLLECTORS[collector] if isinstance(collector, str) else collector
+    name = collector.name
     with session_scope() as session:
         run = FeedRun(source=name)
         session.add(run)

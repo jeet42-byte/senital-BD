@@ -15,6 +15,7 @@ class SightingOut(BaseModel):
     last_seen: datetime
     confidence: int | None
     reference: str | None
+    note: str | None = None
 
 
 class IndicatorOut(BaseModel):

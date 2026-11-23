@@ -35,6 +35,10 @@ class RawIndicator:
     tags: list[str] = field(default_factory=list)
     reference: str | None = None
     country: str | None = None
+    # Bangladesh reasons the source already knows (e.g. a fuzzy brand match
+    # that plain substring tagging would miss), and a human-readable note.
+    extra_reasons: list[str] = field(default_factory=list)
+    note: str | None = None
 
 
 class FeedError(Exception):

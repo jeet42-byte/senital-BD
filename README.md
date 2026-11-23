@@ -5,8 +5,8 @@ indicators of compromise (malicious IPs, domains, URLs and file hashes) from pub
 feeds, scores how trustworthy each one is, flags those that concern Bangladesh, and
 publishes blocklists that firewalls, DNS servers and SIEMs can use directly.
 
-> **Status: Phases 1–3 are built:** platform core, dashboard, phishing hunter, and the
-> honeypot sensor kit. See [Roadmap](#roadmap).
+> **Status: Phases 1–4 are built:** platform core, dashboard, phishing hunter, honeypot
+> sensor, and correlation with a TAXII 2.1 server. See [Roadmap](#roadmap).
 
 ## Dashboard
 
@@ -141,6 +141,29 @@ Safety: the real SSH accepts keys only, on a non-standard port; automatic securi
 are on; containers are memory-capped; the certificate stream listens on localhost only;
 captured files are deleted after 7 days and logs after 14.
 
+## Correlation and TAXII (Phase 4)
+
+`python -m sentinel.correlate` (run after every collection) links indicators that share
+infrastructure; the honeypot shipper adds its own links as it goes:
+
+| Link | From | Example |
+|---|---|---|
+| hosted on | each URL's host, when that host is itself an indicator | a URLhaus Mozi URL served from a Feodo botnet IP |
+| resolves to | DNS lookups for hunter, Bangladesh and high-score domains | a fake bKash domain pointing at a ThreatFox IP |
+| downloaded | honeypot sessions | an attacker that fetched a malware URL |
+| delivers | honeypot captures | that URL and the file hash it returned |
+
+Only known indicators are linked. DNS answers are stored separately and never become
+indicators, because a phishing domain on shared hosting must not get the host blocked.
+The dashboard shows each indicator's connections as a graph, and a panel lists the links
+that cross sources (one feed alone would never show them).
+
+**TAXII 2.1** (read-only) at `/taxii2/`, with two collections: all indicators scoring 50 or
+more, and only those aimed at Bangladesh. It pages with `next` and supports `added_after`,
+so OpenCTI, MISP, Splunk, Elastic or Microsoft Sentinel can poll for what is new. Links
+are exported as STIX `relationship` objects. The tests read the feed with the
+`taxii2-client` library, the same way those tools do.
+
 ## Quick start
 
 ```bash
@@ -179,6 +202,9 @@ python -m pytest -q
 | `GET /feeds/{ip,domain,url,hash}.txt?min_score=50&bd_only=false` | Plain blocklists |
 | `GET /feeds/rpz.zone` | DNS firewall zone |
 | `GET /feeds/mikrotik.rsc` | RouterOS address-list script |
+| `GET /taxii2/` | TAXII 2.1 discovery (collections: all, Bangladesh) |
+| `GET /api/v1/graph?type=&value=` | An indicator's connections |
+| `GET /api/v1/correlations` | Links across sources |
 | `GET /api/v1/explain?type=&value=` | Step-by-step score breakdown |
 | `GET /api/v1/feed-preview?kind=&min_score=&bd_only=` | Size of a feed before subscribing |
 | `GET /feeds/stix.json` | STIX 2.1 bundle |
@@ -196,7 +222,7 @@ service has no write endpoints to attack.
 | **MikroTik** | `/tool fetch` + `/import` on a schedule | `/feeds/mikrotik.rsc` |
 | **BIND / Unbound** | Response Policy Zone | `/feeds/rpz.zone` |
 | **Pi-hole** | Adlists | `/feeds/domain.txt` |
-| **MISP / OpenCTI / Splunk** | STIX import | `/feeds/stix.json` |
+| **MISP / OpenCTI / Splunk / Elastic / Sentinel** | TAXII 2.1 feed | `/taxii2/` |
 
 Add `?bd_only=true` for threats aimed at Bangladesh only, or raise `min_score` to block less.
 
@@ -224,8 +250,9 @@ sentinel/
 deploy/           sensor VM kit: setup.sh, docker-compose.yml, systemd units
   scoring.py      confidence model
   ingest.py       pipeline + CLI
-  exporters.py    plain text, RPZ, STIX 2.1
-  api/            FastAPI app (dashboard, API, feeds)
+  exporters.py    plain text, RPZ, MikroTik, STIX 2.1 (with relationships)
+  correlate.py    links between indicators (shared hosts, DNS)
+  api/            FastAPI app (dashboard, API, feeds) and taxii.py (TAXII 2.1)
   web/            dashboard: index.html + assets/app.js, app.css (no build step)
 tests/            tests with sample data from each feed
 ```
@@ -237,7 +264,7 @@ tests/            tests with sample data from each feed
 - [ ] Phase 2b: screenshot suspected sites and compare them visually with the real login pages
 - [x] **Phase 3, honeynet:** Cowrie SSH/Telnet sensor, live certificate stream, shipper and dashboard panel
 - [ ] More sensors: Dionaea (SMB/HTTP malware capture), a fake bKash login page
-- [ ] **Phase 4, correlation:** link phishing domains, honeypot attackers and feed indicators through shared infrastructure; TAXII 2.1 server
+- [x] **Phase 4, correlation:** shared hosts, DNS, honeypot downloads; connection graph and cross-source panel; TAXII 2.1 server
 - [x] **Dashboard:** lookup, threat pulse, impersonated brands, explorer, score breakdown, blocklist builder
 - [ ] More feeds: AlienVault OTX, CISA KEV, MalwareBazaar, PhishTank
 

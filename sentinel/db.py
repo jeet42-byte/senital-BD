@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -39,6 +39,9 @@ def init_db(url: str | None = None) -> Engine:
     if _engine is None or _engine.url.render_as_string(hide_password=False) != url:
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
         _engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
+        if url.startswith("sqlite"):
+            # PostgreSQL enforces ON DELETE CASCADE; SQLite only when asked.
+            event.listen(_engine, "connect", lambda conn, _: conn.execute("PRAGMA foreign_keys=ON"))
         _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
 
     from sentinel import models  # noqa: F401  registers the tables

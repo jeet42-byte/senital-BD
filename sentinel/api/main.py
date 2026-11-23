@@ -13,6 +13,9 @@ Read-only: data only enters through the ingest job.
   GET /api/v1/feed-preview        size of a feed before you subscribe to it
   GET /api/v1/feed-runs           pipeline health
   GET /api/v1/honeypot            what attackers did on Sentinel-BD's own sensors
+  GET /api/v1/graph?type=&value=  an indicator's connections (shared infrastructure)
+  GET /api/v1/correlations        notable links, especially across sources
+  GET /taxii2/                    TAXII 2.1 server (read-only)
   GET /feeds/{ip|domain|url|hash}.txt   blocklists for firewalls
   GET /feeds/rpz.zone             DNS firewall zone
   GET /feeds/mikrotik.rsc         RouterOS address-list script
@@ -31,12 +34,16 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import String, cast, func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from sentinel import __version__
 from sentinel.api.schemas import (
+    Correlation,
     FeedPreview,
+    Graph,
+    GraphEdge,
+    GraphNode,
     FeedRunOut,
     HoneypotStats,
     IndicatorOut,
@@ -47,10 +54,12 @@ from sentinel.api.schemas import (
     Stats,
     TimelinePoint,
 )
+from sentinel.api.taxii import router as taxii_router
 from sentinel.db import get_session, init_db
 from sentinel.exporters import (
     FEED_TYPES,
     GENERATOR,
+    relations_among,
     select_indicators,
     to_mikrotik,
     to_plain_text,
@@ -58,7 +67,7 @@ from sentinel.exporters import (
     to_stix_bundle,
 )
 from sentinel.indicators import IndicatorType, guess_type, normalize
-from sentinel.models import FeedRun, HoneypotDaily, Indicator, Sighting
+from sentinel.models import FeedRun, HoneypotDaily, Indicator, Relation, Resolution, Sighting
 from sentinel.scoring import Evidence, explain_score
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -89,6 +98,7 @@ app = FastAPI(
 # Public, read-only data: any origin may GET it. No cookies, no writes.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 app.mount("/assets", StaticFiles(directory=WEB_DIR / "assets"), name="assets")
+app.include_router(taxii_router)
 
 SessionDep = Annotated[Session, Depends(get_session)]
 MinScore = Annotated[int, Query(ge=0, le=100, description="Only indicators scoring at least this")]
@@ -279,6 +289,7 @@ def stats(session: SessionDep) -> Stats:
         brands=dict(brands.most_common()),
         bd_reason_kinds=dict(reasons.most_common()),
         timeline=timeline,
+        relations=grouped(Relation.kind),
         last_updated=last_ok,
         last_runs=[FeedRunOut.model_validate(run) for run in latest_per_source.values()],
     )
@@ -342,6 +353,92 @@ def honeypot(
         commands=top("command", 8),
         top_attackers=top("attacker", 8),
     )
+
+
+OWN_SENSORS = {"honeypot", "phishhunter"}
+GRAPH_MAX_NODES = 60
+
+
+def _node(indicator: Indicator) -> GraphNode:
+    return GraphNode(
+        id=indicator.id, type=indicator.type, value=indicator.value, score=indicator.score,
+        severity=indicator.severity, bd_relevant=indicator.bd_relevant, malware=indicator.malware,
+        sources=sorted({s.source for s in indicator.sightings}),
+    )
+
+
+@app.get("/api/v1/graph", response_model=Graph)
+def graph(
+    session: SessionDep,
+    type: IndicatorType,
+    value: Annotated[str, Query(min_length=1, max_length=2048)],
+    depth: Annotated[int, Query(ge=1, le=3)] = 2,
+) -> Graph:
+    _, center = _find(session, type, value)
+    if center is None:
+        raise HTTPException(status_code=404, detail="Indicator not found")
+
+    node_ids, frontier, edges, truncated = {center.id}, {center.id}, {}, False
+    for _ in range(depth):
+        if not frontier:
+            break
+        rows = session.scalars(
+            select(Relation).where(or_(Relation.src_id.in_(frontier), Relation.dst_id.in_(frontier))).limit(400)
+        ).all()
+        next_frontier: set[int] = set()
+        for rel in rows:
+            for other in (rel.src_id, rel.dst_id):
+                if other not in node_ids:
+                    if len(node_ids) >= GRAPH_MAX_NODES:
+                        truncated = True
+                        continue
+                    node_ids.add(other)
+                    next_frontier.add(other)
+            if rel.src_id in node_ids and rel.dst_id in node_ids:
+                edges[rel.id] = rel
+        frontier = next_frontier
+
+    nodes = session.scalars(select(Indicator).where(Indicator.id.in_(node_ids))).all()
+    resolutions = sorted(session.scalars(select(Resolution.ip).where(Resolution.indicator_id == center.id)))
+    return Graph(
+        center=center.id,
+        nodes=[_node(n) for n in nodes],
+        edges=[GraphEdge(src=e.src_id, dst=e.dst_id, kind=e.kind, origin=e.origin, last_seen=e.last_seen)
+               for e in edges.values()],
+        truncated=truncated,
+        resolutions=resolutions,
+    )
+
+
+@app.get("/api/v1/correlations", response_model=list[Correlation])
+def correlations(
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    cross_only: bool = True,
+) -> list[Correlation]:
+    """Links worth a look: those touching Sentinel-BD's own sensors first,
+    then links between indicators no single feed connects."""
+    own = Relation.src.has(Indicator.sightings.any(Sighting.source.in_(OWN_SENSORS))) | Relation.dst.has(
+        Indicator.sightings.any(Sighting.source.in_(OWN_SENSORS)))
+    candidates = list(session.scalars(select(Relation).where(own).order_by(Relation.last_seen.desc()).limit(200)))
+    candidates += session.scalars(
+        select(Relation).where(Relation.kind != "hosted-on").order_by(Relation.last_seen.desc()).limit(300))
+    candidates += session.scalars(select(Relation).order_by(Relation.last_seen.desc()).limit(1000))
+
+    out, seen = [], set()
+    for rel in candidates:
+        if rel.id in seen:
+            continue
+        seen.add(rel.id)
+        src, dst = _node(rel.src), _node(rel.dst)
+        cross = not set(src.sources) & set(dst.sources)
+        own_sensor = bool((set(src.sources) | set(dst.sources)) & OWN_SENSORS)
+        if cross_only and not (cross or own_sensor):
+            continue
+        out.append(Correlation(kind=rel.kind, src=src, dst=dst, last_seen=rel.last_seen,
+                               cross_source=cross, own_sensor=own_sensor))
+    out.sort(key=lambda c: (c.own_sensor, c.cross_source, max(c.src.score, c.dst.score), c.last_seen), reverse=True)
+    return out[:limit]
 
 
 @app.get("/api/v1/feed-runs", response_model=list[FeedRunOut])
@@ -412,6 +509,6 @@ def stix_feed(
     types = (type,) if type else tuple(IndicatorType)
     rows = select_indicators(session, types, min_score, bd_only, limit, with_sightings=True)
     return Response(
-        to_stix_bundle(rows), media_type="application/stix+json;version=2.1",
+        to_stix_bundle(rows, relations=relations_among(session, rows)), media_type="application/stix+json;version=2.1",
         headers=_feed_headers(len(rows)),
     )

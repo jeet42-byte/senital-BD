@@ -74,6 +74,27 @@ def write_stats(session, stats: DailyStats) -> int:
     return len(rows)
 
 
+def link_sessions(db, sessions) -> int:
+    """attacker IP -downloaded-> URL -delivers-> file hash."""
+    from sentinel.correlate import find, link
+    from sentinel.indicators import IndicatorType, normalize
+
+    created = 0
+    for s in sessions:
+        attacker = find(db, IndicatorType.IPV4.value, s.src_ip) if s.tried_login else None
+        for url, sha in s.downloads:
+            url_row = find(db, IndicatorType.URL.value, normalize(IndicatorType.URL, url) or "")
+            if url_row is None:
+                continue
+            if attacker is not None:
+                created += link(db, attacker, url_row, "downloaded", SOURCE, s.ended)
+            sha_value = normalize(IndicatorType.SHA256, sha or "")
+            file_row = find(db, IndicatorType.SHA256.value, sha_value) if sha_value else None
+            if file_row is not None:
+                created += link(db, url_row, file_row, "delivers", SOURCE, s.ended)
+    return created
+
+
 def ship(log_dir: Path, state_file: Path) -> FeedRun:
     from sentinel.ingest import ingest_raw, rescore
 
@@ -85,6 +106,7 @@ def ship(log_dir: Path, state_file: Path) -> FeedRun:
         run = FeedRun(source=SOURCE, started_at=started)
         stats = ingest_raw(db, SOURCE, raws)
         write_stats(db, DailyStats().add(sessions))
+        link_sessions(db, sessions)
         run.fetched, run.rejected = stats.fetched, stats.rejected
         run.created, run.updated = stats.created, stats.updated
         run.ok = True

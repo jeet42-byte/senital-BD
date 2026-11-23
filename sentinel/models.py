@@ -48,6 +48,8 @@ class Indicator(Base):
     threat_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     malware: Mapped[str | None] = mapped_column(String(128), nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # When the correlation job last looked this domain up in DNS.
+    dns_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     sightings: Mapped[list[Sighting]] = relationship(
         back_populates="indicator", cascade="all, delete-orphan", lazy="selectin"
@@ -72,6 +74,44 @@ class Sighting(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     indicator: Mapped[Indicator] = relationship(back_populates="sightings")
+
+
+class Relation(Base):
+    """A link between two known indicators.
+
+    kinds:  hosted-on    url -> domain | ipv4   (the URL's host)
+            resolves-to  domain -> ipv4         (DNS answer that is itself an indicator)
+            downloaded   ipv4 -> url            (honeypot: the attacker fetched it)
+            delivers     url -> sha256          (honeypot: the file that came back)
+    """
+
+    __tablename__ = "relation"
+    __table_args__ = (UniqueConstraint("src_id", "dst_id", "kind", name="uq_relation"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    src_id: Mapped[int] = mapped_column(ForeignKey("indicator.id", ondelete="CASCADE"), index=True)
+    dst_id: Mapped[int] = mapped_column(ForeignKey("indicator.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    origin: Mapped[str] = mapped_column(String(32))  # which job established it
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    src: Mapped[Indicator] = relationship(foreign_keys=[src_id], lazy="joined")
+    dst: Mapped[Indicator] = relationship(foreign_keys=[dst_id], lazy="joined")
+
+
+class Resolution(Base):
+    """What a domain resolved to. Kept apart from indicators on purpose: a
+    phishing domain on shared hosting must not get the host's IP blocked."""
+
+    __tablename__ = "dns_resolution"
+    __table_args__ = (UniqueConstraint("indicator_id", "ip", name="uq_resolution"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    indicator_id: Mapped[int] = mapped_column(ForeignKey("indicator.id", ondelete="CASCADE"), index=True)
+    ip: Mapped[str] = mapped_column(String(45), index=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class HoneypotDaily(Base):

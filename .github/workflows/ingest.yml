@@ -43,3 +43,5 @@ jobs:
         run: python -m sentinel.bd update
       - name: Collect feeds
         run: python -m sentinel.ingest
+      - name: Correlate (shared hosts, DNS)
+        run: python -m sentinel.correlate

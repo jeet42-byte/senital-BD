@@ -7,6 +7,8 @@ httpx==0.28.1
 pydantic-settings==2.7.0
 tldextract==5.1.3           # registrable-domain parsing (bundled suffix list, no network)
 websockets==14.1            # live certificate stream (phishing hunter on a server)
+dnspython==2.7.0            # DNS lookups for correlation
 
 # Tests
 pytest==8.3.4
+taxii2-client==2.3.0        # the TAXII server is tested with a real TAXII client

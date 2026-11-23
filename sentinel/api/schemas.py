@@ -94,6 +94,42 @@ class FeedRunOut(BaseModel):
     error: str | None
 
 
+class GraphNode(BaseModel):
+    id: int
+    type: str
+    value: str
+    score: int
+    severity: str
+    bd_relevant: bool
+    malware: str | None
+    sources: list[str]
+
+
+class GraphEdge(BaseModel):
+    src: int
+    dst: int
+    kind: str
+    origin: str
+    last_seen: datetime
+
+
+class Graph(BaseModel):
+    center: int
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    truncated: bool
+    resolutions: list[str]   # every IP the domain resolved to (center only)
+
+
+class Correlation(BaseModel):
+    kind: str
+    src: GraphNode
+    dst: GraphNode
+    last_seen: datetime
+    cross_source: bool
+    own_sensor: bool
+
+
 class Ranked(BaseModel):
     value: str
     count: int
@@ -124,5 +160,6 @@ class Stats(BaseModel):
     brands: dict[str, int]
     bd_reason_kinds: dict[str, int]
     timeline: list[TimelinePoint]
+    relations: dict[str, int] = {}
     last_updated: datetime | None
     last_runs: list[FeedRunOut]

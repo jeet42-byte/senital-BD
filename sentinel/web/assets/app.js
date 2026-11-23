@@ -661,6 +661,8 @@ async function openDrawer(item, explanation = null) {
 
   const mathSection = h("section", {}, h("h3", {}, "Why this score"), h("p", { class: "muted" }, "Working it out…"));
   body.append(mathSection);
+  const connSection = h("section", {}, h("h3", {}, "Connections"), h("p", { class: "muted" }, "Looking for shared infrastructure…"));
+  body.append(connSection);
 
   if (item.bd_reasons.length) {
     body.append(h("section", {}, h("h3", {}, "Why it concerns Bangladesh"),
@@ -687,6 +689,8 @@ async function openDrawer(item, explanation = null) {
   drawer.hidden = false;
   document.body.style.overflow = "hidden";
   $(".drawer-close", drawer).focus();
+
+  loadConnections(item, connSection);
 
   try {
     explanation ||= await api("/api/v1/explain", { type: item.type, value: item.value });
@@ -717,6 +721,175 @@ function scoreMath(ex) {
     ex.bd_boost ? h("div", { class: "math-step" }, h("span", {}, "Concerns Bangladesh"), h("span", { class: "v" }, `+ ${ex.bd_boost}`)) : null,
     h("div", { class: "math-step math-total" }, h("span", {}, "Score (capped at 100)"), h("span", { class: "v" }, String(ex.score))),
   );
+}
+
+/* ---------------------------------------------------------- connections */
+
+const TYPE_CLASS = (type) => (["md5", "sha1", "sha256"].includes(type) ? "hash" : type);
+const EDGE_TEXT = {
+  "hosted-on": ["Hosted on", "URLs on this host"],
+  "resolves-to": ["Resolves to", "Domains pointing here"],
+  "downloaded": ["Downloaded", "Downloaded by (honeypot)"],
+  "delivers": ["Delivered", "Delivered by"],
+};
+
+async function openByValue(type, value) {
+  try {
+    const result = await api("/api/v1/lookup", { type, value });
+    if (result.found) openDrawer(result.indicator, result.explanation);
+  } catch { /* leave the current drawer */ }
+}
+
+async function loadConnections(item, section) {
+  let graph;
+  try {
+    graph = await api("/api/v1/graph", { type: item.type, value: item.value, depth: 2 });
+  } catch {
+    clear(section).append(h("h3", {}, "Connections"), h("p", { class: "muted" }, "Unavailable right now."));
+    return;
+  }
+  clear(section).append(h("h3", {}, "Connections"));
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const direct = graph.edges.filter((e) => e.src === graph.center || e.dst === graph.center);
+
+  if (!direct.length) {
+    section.append(h("p", { class: "muted" }, "No shared infrastructure with other known indicators yet."));
+  } else {
+    section.append(connGraph(graph, byId));
+    section.append(h("div", { class: "conn-legend" },
+      [["url", "URL"], ["domain", "Domain"], ["ipv4", "IP"], ["hash", "File hash"]].map(([c, label]) =>
+        h("span", {}, h("i", { class: `t-${c}`, style: { background: `var(--t-${c})`, borderRadius: c === "hash" ? "2px" : "50%" } }), label))));
+    const groups = new Map();
+    for (const e of direct) {
+      const outgoing = e.src === graph.center;
+      const other = byId.get(outgoing ? e.dst : e.src);
+      if (!other) continue;
+      const title = (EDGE_TEXT[e.kind] || [e.kind, e.kind])[outgoing ? 0 : 1];
+      if (!groups.has(title)) groups.set(title, []);
+      groups.get(title).push(other);
+    }
+    for (const [title, nodes] of groups) {
+      section.append(h("div", { class: "conn-group" }, h("h4", {}, `${title} (${nodes.length})`),
+        nodes.slice(0, 12).map((n) => h("button", { type: "button", class: "conn-item", onclick: () => openByValue(n.type, n.value) },
+          h("span", { class: `sev sev-${n.severity}`, title: `score ${n.score}` }, String(n.score)),
+          h("code", { title: defang(n.type, n.value) }, defang(n.type, n.value)),
+          h("span", { class: "muted" }, n.sources.map(sourceName).join(", ")))),
+        nodes.length > 12 ? h("p", { class: "muted" }, `and ${nodes.length - 12} more`) : null));
+    }
+    if (graph.truncated) section.append(h("p", { class: "muted" }, "Showing the nearest 60 connections."));
+  }
+  if (graph.resolutions.length) {
+    const known = new Set(graph.nodes.filter((n) => n.type === "ipv4").map((n) => n.value));
+    section.append(h("div", { class: "conn-group" }, h("h4", {}, "DNS answers"),
+      h("p", { class: "muted", style: { margin: 0 } },
+        graph.resolutions.map((ip) => `${defang("ipv4", ip)}${known.has(ip) ? " (known malicious)" : ""}`).join(" · "))));
+  }
+}
+
+/** Center node, its neighbours on a ring, second-hop nodes beyond them. */
+function connGraph(graph, byId) {
+  const W = 480, H = 300, cx = W / 2, cy = H / 2;
+  const depth = new Map([[graph.center, 0]]);
+  const parent = new Map();
+  let frontier = [graph.center];
+  for (let d = 1; d <= 2 && frontier.length; d++) {
+    const next = [];
+    for (const id of frontier) {
+      for (const e of graph.edges) {
+        const other = e.src === id ? e.dst : e.dst === id ? e.src : null;
+        if (other !== null && !depth.has(other)) { depth.set(other, d); parent.set(other, id); next.push(other); }
+      }
+    }
+    frontier = next;
+  }
+  const ring1 = [...depth].filter(([, d]) => d === 1).map(([id]) => id).slice(0, 14);
+  const pos = new Map([[graph.center, [cx, cy, 0]]]);
+  ring1.forEach((id, i) => {
+    const a = (i / ring1.length) * Math.PI * 2 - Math.PI / 2;
+    pos.set(id, [cx + Math.cos(a) * 95, cy + Math.sin(a) * 95, a]);
+  });
+  const ring2 = [...depth].filter(([id, d]) => d === 2 && pos.has(parent.get(id))).map(([id]) => id).slice(0, 24);
+  const kids = new Map();
+  for (const id of ring2) {
+    const p = parent.get(id);
+    kids.set(p, [...(kids.get(p) || []), id]);
+  }
+  for (const [p, list] of kids) {
+    const base = pos.get(p)[2];
+    list.forEach((id, i) => {
+      const a = base + (i - (list.length - 1) / 2) * 0.28;
+      pos.set(id, [cx + Math.cos(a) * 140, cy + Math.sin(a) * 128, a]);
+    });
+  }
+
+  const svg = s("svg", { class: "conn-graph", viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Connection graph" });
+  for (const e of graph.edges) {
+    const a = pos.get(e.src), b = pos.get(e.dst);
+    if (a && b) svg.append(s("line", { class: "edge", x1: a[0], y1: a[1], x2: b[0], y2: b[1] }));
+  }
+  for (const [id, [x, y]] of pos) {
+    const n = byId.get(id);
+    if (!n) continue;
+    const isCenter = id === graph.center;
+    const r = isCenter ? 13 : depth.get(id) === 1 ? 8 + n.score / 25 : 6;
+    // Hashes are squares: shape, not only colour, tells them apart.
+    const isHash = TYPE_CLASS(n.type) === "hash";
+    const circle = s(isHash ? "rect" : "circle", {
+      class: `node t-${TYPE_CLASS(n.type)}${isCenter ? " center" : ""}`,
+      ...(isHash ? { x: x - r, y: y - r, width: 2 * r, height: 2 * r, rx: 2 } : { cx: x, cy: y, r }),
+      tabindex: isCenter ? -1 : 0, role: isCenter ? "img" : "button",
+      "aria-label": `${TYPE_LABEL[n.type] || n.type} ${defang(n.type, n.value)}, score ${n.score}`,
+      onclick: () => !isCenter && openByValue(n.type, n.value),
+      onkeydown: (ev) => { if (ev.key === "Enter" && !isCenter) openByValue(n.type, n.value); },
+      onmouseenter: (ev) => showNodeTip(ev, n), onmouseleave: hideTip,
+    });
+    svg.append(circle);
+    if (depth.get(id) <= 1 && !isCenter) {
+      const text = defang(n.type, n.value);
+      svg.append(s("text", { class: "label", x, y: y + r + 12, "text-anchor": "middle" },
+        text.length > 22 ? `${text.slice(0, 21)}…` : text));
+    }
+  }
+  return svg;
+}
+
+function showNodeTip(event, n) {
+  const tip = $("#tooltip");
+  clear(tip).append(h("strong", {}, String(n.score)), ` ${TYPE_LABEL[n.type] || n.type} · ${n.sources.map(sourceName).join(", ")}`);
+  const rect = event.currentTarget.getBoundingClientRect();
+  tip.style.left = `${rect.left + rect.width / 2}px`;
+  tip.style.top = `${rect.top}px`;
+  tip.hidden = false;
+}
+
+const LINK_TEXT = { "hosted-on": "hosted on", "resolves-to": "resolves to", downloaded: "downloaded", delivers: "delivered" };
+
+async function loadLinks() {
+  let items;
+  try {
+    items = await api("/api/v1/correlations", { limit: 12 });
+  } catch {
+    return;
+  }
+  const root = clear($("#links"));
+  if (stats?.relations) {
+    clear($("#links-counts")).append(...Object.entries(stats.relations).map(([k, n]) =>
+      h("span", {}, h("b", {}, fmt(n)), ` ${LINK_TEXT[k] || k}`)));
+  }
+  if (!items.length) {
+    root.append(h("li", { class: "empty" },
+      "No cross-source links yet. They appear as the honeypot, the phishing hunter and the feeds start to overlap."));
+    return;
+  }
+  const end = (n) => h("button", { type: "button", class: "link-end", onclick: () => openByValue(n.type, n.value) },
+    h("span", { class: "link-value", title: defang(n.type, n.value) }, defang(n.type, n.value)),
+    h("span", { class: "link-meta" }, `${TYPE_LABEL[n.type] || n.type} · ${n.score} · ${n.sources.map(sourceName).join(", ")}`));
+  for (const c of items) {
+    root.append(h("li", { class: "link-row" },
+      end(c.src), h("span", { class: "link-kind" }, LINK_TEXT[c.kind] || c.kind), end(c.dst),
+      c.own_sensor ? h("span", { class: "badge-own", title: "Found by Sentinel-BD's own sensors" }, "own sensor")
+        : h("span", { class: "muted", style: { fontSize: "12px" } }, ago(c.last_seen))));
+  }
 }
 
 /** Only well-known reference sites become links; anything else stays text. */
@@ -753,7 +926,7 @@ const VENDORS = [
   ["mikrotik", "MikroTik"],
   ["bind", "BIND (RPZ)"],
   ["pihole", "Pi-hole"],
-  ["stix", "SIEM (STIX)"],
+  ["stix", "SIEM (TAXII)"],
 ];
 
 function feedUrl(kind = builder.kind, extra = {}) {
@@ -795,7 +968,7 @@ function vendorSnippet() {
       if (k !== "domain") return "Pi-hole blocks domains. Choose Domains above.";
       return `Pi-hole admin → Lists (Adlists) → Address:\n  ${feedUrl()}\nAdd, then update gravity:\n  pihole -g`;
     case "stix":
-      return `STIX 2.1 bundle (all types, same score and Bangladesh filters):\n  ${feedUrl("stix")}\n\nOpenCTI / MISP: import it as a STIX 2.1 feed.\nSplunk / Elastic: use a threat-intel input that reads STIX 2.1 over HTTPS.`;
+      return `TAXII 2.1 server (subscribe; your tool polls for new objects):\n  ${location.origin}/taxii2/\n  collections: "all indicators" and "aimed at Bangladesh"\n\nOr a one-off STIX 2.1 bundle:\n  ${feedUrl("stix")}\n\nOpenCTI: TAXII2 connector.  MISP: Sync Actions → Feeds (TAXII).\nSplunk / Elastic / Microsoft Sentinel: Threat Intelligence – TAXII data connector.`;
     default:
       return "";
   }
@@ -937,6 +1110,7 @@ async function loadStats() {
     renderFacets();
     renderHealth();
     syncControls();
+    loadLinks();
   } catch (error) {
     $("#status .status-dot").dataset.state = "error";
     $("#status .status-text").textContent = `API unreachable (${error.message})`;

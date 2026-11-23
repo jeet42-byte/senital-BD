@@ -127,7 +127,46 @@ def stix_pattern(kind: str, value: str) -> str:
     }[kind]
 
 
-def to_stix_bundle(indicators: Sequence[Indicator], now: datetime | None = None) -> str:
+def stix_id(indicator: Indicator) -> str:
+    return f"indicator--{uuid.uuid5(STIX_NAMESPACE, f'{indicator.type}:{indicator.value}')}"
+
+
+def stix_relationships(indicators: Sequence[Indicator], relations: Sequence) -> list[dict]:
+    """STIX relationship objects for links whose both ends are exported."""
+    by_id = {i.id: i for i in indicators}
+    out = []
+    for rel in relations:
+        src, dst = by_id.get(rel.src_id), by_id.get(rel.dst_id)
+        if src is None or dst is None:
+            continue
+        out.append({
+            "type": "relationship",
+            "spec_version": "2.1",
+            "id": f"relationship--{uuid.uuid5(STIX_NAMESPACE, f'{rel.src_id}:{rel.kind}:{rel.dst_id}')}",
+            "created_by_ref": IDENTITY_ID,
+            "created": _stix_time(rel.first_seen),
+            "modified": _stix_time(rel.last_seen),
+            "relationship_type": "related-to",
+            "description": rel.kind,
+            "source_ref": stix_id(src),
+            "target_ref": stix_id(dst),
+        })
+    return out
+
+
+def relations_among(session: Session, indicators: Sequence[Indicator]) -> list:
+    from sentinel.models import Relation
+
+    ids = [i.id for i in indicators]
+    found = []
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        found += session.scalars(select(Relation).where(Relation.src_id.in_(chunk))).all()
+    wanted = set(ids)
+    return [r for r in found if r.dst_id in wanted]
+
+
+def to_stix_bundle(indicators: Sequence[Indicator], now: datetime | None = None, relations: Sequence = ()) -> str:
     now = now or datetime.now(timezone.utc)
     created = _stix_time(datetime(2026, 1, 1, tzinfo=timezone.utc))
     objects: list[dict] = [
@@ -151,7 +190,7 @@ def to_stix_bundle(indicators: Sequence[Indicator], now: datetime | None = None)
             {
                 "type": "indicator",
                 "spec_version": "2.1",
-                "id": f"indicator--{uuid.uuid5(STIX_NAMESPACE, f'{indicator.type}:{indicator.value}')}",
+                "id": stix_id(indicator),
                 "created_by_ref": IDENTITY_ID,
                 "created": _stix_time(indicator.first_seen),
                 "modified": _stix_time(indicator.last_seen),
@@ -168,6 +207,7 @@ def to_stix_bundle(indicators: Sequence[Indicator], now: datetime | None = None)
                 ],
             }
         )
+    objects += stix_relationships(indicators, relations or [])
     bundle = {
         "type": "bundle",
         "id": f"bundle--{uuid.uuid4()}",

@@ -51,6 +51,7 @@ BD_OFFICIAL: frozenset[str] = frozenset(
         "bkash.com", "nagad.com.bd", "dutchbanglabank.com", "sonalibank.com.bd",
         "janatabank-bd.com", "agranibank.org", "rupalibank.com.bd",
         "bracbank.com", "islamibankbd.com", "ebl.com.bd", "citybankplc.com",
+        "primebank.com.bd", "pubalibangla.com", "jb.com.bd", "bb.org.bd", "bkashcdn.com",
         "grameenphone.com", "robi.com.bd", "banglalink.net", "teletalk.com.bd",
         "prothomalo.com", "bdnews24.com", "thedailystar.net",
     }

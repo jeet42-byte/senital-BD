@@ -248,7 +248,11 @@ def analyze(hostname: str) -> Finding | None:
     ]
     score = base
 
-    words = sorted({w for w in PHISHING_WORDS if w in _flat(domain) and w not in token})
+    # Phishing words only count inside the lookalike name itself. In
+    # login.primebank.com the "login" belongs to whoever owns primebank.com;
+    # in bkash.com.secure-login.top it belongs to the attacker.
+    word_zone = _flat(name_ascii) if technique != "subdomain" else _flat(domain)
+    words = sorted({w for w in PHISHING_WORDS if w in word_zone and w not in token})
     if words:
         score += 15
         reasons.append("Phishing words: " + ", ".join(words[:4]))

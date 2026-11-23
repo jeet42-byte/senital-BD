@@ -172,32 +172,45 @@ def run_collector(
 ) -> FeedRun:
     """Run one collector (by name or instance) and record the outcome.
 
-    Never raises for feed errors: they are logged and stored on the run.
+    The download happens before any database work: a slow feed (crt.sh can
+    take minutes) must not hold a transaction open, or the database closes
+    the idle connection. Never raises for feed errors; they are logged and
+    stored on the run.
     """
     collector = COLLECTORS[collector] if isinstance(collector, str) else collector
     name = collector.name
-    with session_scope() as session:
-        run = FeedRun(source=name)
-        session.add(run)
-        session.flush()
+    started = datetime.now(timezone.utc)
+
+    def describe(exc: Exception) -> str:
+        if isinstance(exc, FeedError):
+            return str(exc)  # already free of secrets; no traceback needed
+        message = collector.redact(f"{type(exc).__name__}: {exc}")
+        log.error("%s failed: %s", name, message, exc_info=True)
+        return message
+
+    error: str | None = None
+    if text is None:
+        assert client is not None
         try:
-            if text is None:
-                assert client is not None
-                text = collector.fetch(client)
-            stats = ingest_raw(session, name, collector.parse(text))
-            run.fetched, run.rejected = stats.fetched, stats.rejected
-            run.created, run.updated = stats.created, stats.updated
-            run.ok = True
+            text = collector.fetch(client)
         except Exception as exc:  # one broken feed must not stop the others
-            session.rollback()
-            if isinstance(exc, FeedError):
-                message = str(exc)  # already free of secrets; no traceback needed
-            else:
-                message = collector.redact(f"{type(exc).__name__}: {exc}")
-                log.error("%s failed: %s", name, message, exc_info=True)
-            run = FeedRun(source=name, ok=False, error=message[:2000])
-            session.add(run)
+            error = describe(exc)
+
+    with session_scope() as session:
+        run = FeedRun(source=name, started_at=started)
+        if error is None:
+            try:
+                stats = ingest_raw(session, name, collector.parse(text))
+                run.fetched, run.rejected = stats.fetched, stats.rejected
+                run.created, run.updated = stats.created, stats.updated
+                run.ok = True
+            except Exception as exc:
+                session.rollback()
+                run = FeedRun(source=name, started_at=started)
+                error = describe(exc)
+        run.error = error[:2000] if error else None
         run.finished_at = datetime.now(timezone.utc)
+        session.add(run)
     log.info(
         "%-13s ok=%s fetched=%d rejected=%d new=%d updated=%d %s",
         name, run.ok, run.fetched, run.rejected, run.created, run.updated, run.error or "",

@@ -47,7 +47,9 @@ def test_lookalikes_are_reported(name, technique, brand, indicator):
     "name",
     [
         "bkash.com", "www.bkash.com", "merchant.bkash.com", "nagad.com.bd", "sonalibank.com.bd",
-        "islamibankbd.com", "google.com", "paypal-login.com",
+        "islamibankbd.com", "google.com", "paypal-login.com", "primebank.com.bd",
+        # The owner's own login page is not a lookalike of anything.
+        "login.primebank.com", "secure-login.teletalk-bd.com",
         # Real words and names one letter from a brand
         "ramnagar.com", "dhakanagar-login.top", "bikashroy.com", "akashtv.com", "prakash-traders.com",
     ],
@@ -161,3 +163,24 @@ def test_crtsh_retries_a_busy_answer():
 def test_backfill_window_is_configurable():
     old = list(CrtShHunter(lookback_days=90).parse(fixture_text("crtsh.json"), now=NOW))
     assert "bkash-login-verify.xyz" in {r.value for r in old}
+
+
+def test_slow_fetch_holds_no_database_transaction(monkeypatch):
+    """The download must finish before the database is touched."""
+    from sentinel import db as dbmod
+
+    events = []
+    real_scope = dbmod.session_scope
+
+    class SlowHunter(CrtShHunter):
+        def fetch(self, client):
+            events.append("fetch")
+            return fixture_text("crtsh.json")
+
+    def watched_scope():
+        events.append("session")
+        return real_scope()
+
+    monkeypatch.setattr("sentinel.ingest.session_scope", watched_scope)
+    run = run_collector(SlowHunter(), client=object())
+    assert run.ok and events == ["fetch", "session"]

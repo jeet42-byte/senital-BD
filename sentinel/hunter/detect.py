@@ -153,43 +153,32 @@ def _exact(text: str) -> str | None:
     return None
 
 
-def _mask_false_friends(text: str) -> str:
-    """Blank out real words ("bikash", "nagar") so no typo is found inside them."""
-    for word in FALSE_FRIENDS:
-        text = text.replace(word, "#" * len(word))
-    return text
-
-
 def _typo(name: str) -> tuple[str, str] | None:
-    """(token, the misspelling) when part of the name is one edit from a brand.
+    """(token, the misspelling) when a whole word of the name is one edit
+    from a brand.
 
-    Substitutions, insertions and swapped letters are searched anywhere in the
-    name. A missing letter is only accepted for a whole word ("bksh-login"),
-    because a shortened brand ("naga", "kash") hides inside too many words.
+    Typosquats change the brand itself and keep it a word of its own:
+    bkassh-login, gramenphone-offer, bksh24. Searching inside longer words
+    instead finds coincidences: "tkash" in hojatkashfi, "primebask" in
+    primebaskets. So the candidates are each word, each pair of adjacent
+    words joined (prime-bnak), and each of those without trailing digits.
     """
     index = _fuzzy_index()
-    lengths = {len(t) for t in BRANDS if len(t) >= FUZZY_MIN_LEN}
+    words = [w for w in re.split(r"[^a-z0-9]+", name) if w]
+    candidates: list[str] = []
+    for i, word in enumerate(words):
+        candidates.append(word)
+        if i + 1 < len(words):
+            candidates.append(word + words[i + 1])
+    candidates += [c.rstrip("0123456789") for c in candidates]
 
-    def match(window: str, allow_shorter: bool) -> str | None:
-        if "#" in window:
-            return None
-        for variant in _deletions(window) | {window}:
+    for candidate in dict.fromkeys(c for c in candidates if len(c) >= FUZZY_MIN_LEN - 1):
+        if candidate in FALSE_FRIENDS:
+            continue
+        for variant in _deletions(candidate) | {candidate}:
             for token in index.get(variant, ()):
-                if window == token or (len(window) < len(token) and not allow_shorter):
-                    continue
-                if _edit_distance(window, token) == 1:
-                    return token
-        return None
-
-    text = _mask_false_friends(_flat(name))
-    for size in sorted({n + d for n in lengths for d in (0, 1)}, reverse=True):
-        for start in range(0, len(text) - size + 1):
-            window = text[start:start + size]
-            if token := match(window, allow_shorter=False):
-                return token, window
-    for word in re.split(r"[^a-z0-9]+", _mask_false_friends(name)):
-        if word and (token := match(word, allow_shorter=True)):
-            return token, word
+                if candidate != token and _edit_distance(candidate, token) == 1:
+                    return token, candidate
     return None
 
 

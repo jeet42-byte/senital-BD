@@ -73,6 +73,7 @@ class StreamHunter:
     def flush(self) -> int:
         from sentinel.ingest import ingest_raw
 
+        self.last_flush = time.monotonic()  # even when empty, or every message would retry
         if not self.pending:
             return 0
         batch = list(self.pending.values())
@@ -113,8 +114,10 @@ async def _loop(url: str, hunter: StreamHunter, backoff: int) -> None:
                 async for message in socket:
                     hunter.handle(message)
                     if time.monotonic() - hunter.last_flush >= FLUSH_SECONDS:
+                        checked = hunter.seen_names
                         written = hunter.flush()
-                        log.info("checked %d names, wrote %d lookalikes", hunter.seen_names, written)
+                        log.info("last minute: checked %d names, wrote %d lookalikes", checked, written)
+                        hunter.seen_names = 0
         except (OSError, asyncio.TimeoutError, Exception) as exc:  # keep running through outages
             log.warning("stream error (%s); reconnecting in %ds", type(exc).__name__, backoff)
             hunter.flush()

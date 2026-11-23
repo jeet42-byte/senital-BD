@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     crtsh.add_argument("--days", type=int, default=7, help="how far back to look (default 7)")
     check = commands.add_parser("check", help="run the detector on names you type")
     check.add_argument("names", nargs="+")
+    recheck = commands.add_parser("recheck", help="drop earlier hunter findings that no longer pass the detector")
+    recheck.add_argument("--dry-run", action="store_true")
     stream = commands.add_parser("stream", help="watch a CertStream websocket continuously")
     stream.add_argument("--url", default="ws://127.0.0.1:8080/domains-only")
     args = parser.parse_args(argv)
@@ -48,6 +50,9 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"    {reason}")
         return 0
 
+    if args.command == "recheck":
+        return recheck(dry_run=args.dry_run)
+
     if args.command == "stream":
         asyncio.run(__import__("sentinel.hunter.stream", fromlist=["run"]).run(args.url))
         return 0
@@ -61,6 +66,46 @@ def main(argv: list[str] | None = None) -> int:
     with session_scope() as session:
         rescore_all(session)
     return 0 if run.ok else 1
+
+
+def recheck(dry_run: bool = False) -> int:
+    """Re-run the detector over stored hunter findings after a rule change.
+
+    A finding the stricter detector rejects loses its hunter sighting; an
+    indicator with no other source is deleted. Feeds that independently
+    reported the same domain keep it.
+    """
+    from sqlalchemy import select
+
+    from sentinel.db import session_scope
+    from sentinel.ingest import rescore
+    from sentinel.models import Indicator, Sighting
+
+    init_db()
+    removed = kept = 0
+    with session_scope() as session:
+        rows = session.scalars(
+            select(Indicator).where(Indicator.sightings.any(Sighting.source == "phishhunter"))
+        ).all()
+        for indicator in rows:
+            finding = analyze(indicator.value)
+            if finding and finding.reportable:
+                kept += 1
+                continue
+            removed += 1
+            print(f"remove {indicator.value}")
+            if dry_run:
+                continue
+            others = [s for s in indicator.sightings if s.source != "phishhunter"]
+            if not others:
+                session.delete(indicator)
+            else:
+                indicator.sightings = others
+                rescore(indicator)
+        if dry_run:
+            session.rollback()
+    print(f"{kept} kept, {removed} {'would be ' if dry_run else ''}removed")
+    return 0
 
 
 if __name__ == "__main__":

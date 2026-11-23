@@ -10,6 +10,7 @@
 #   sudo bash setup.sh status     what is running, and the last shipments.
 #   sudo bash setup.sh update     pull the latest code and restart services.
 #   sudo bash setup.sh set-db     enter a new DATABASE_URL (e.g. after a password reset).
+#   sudo bash setup.sh recheck    drop earlier hunter findings that newer rules reject.
 #
 # Before stage 1, allow the new ports in the Azure firewall (Cloud Shell):
 #   az vm open-port -g sentinel-bd -n sentinel-sensor-1 --port 23,2222,2323,22222 --priority 1010
@@ -224,8 +225,9 @@ case "${1:-install}" in
   finalize) stage_finalize ;;
   status)   stage_status ;;
   update)   stage_update ;;
+  recheck)  sudo -u sentinel bash -c "set -a; . '$ENV_FILE'; cd '$APP' && exec .venv/bin/python -m sentinel.hunter recheck" ;;
   set-db)   rm -f "$ENV_FILE"; configure_database
             systemctl restart sentinel-hunter.service 2>/dev/null || true
             say "Database updated." ;;
-  *) die "Unknown command '$1'. Use: install | finalize | status | update | set-db" ;;
+  *) die "Unknown command '$1'. Use: install | finalize | status | update | set-db | recheck" ;;
 esac

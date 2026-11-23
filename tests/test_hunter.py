@@ -184,3 +184,40 @@ def test_slow_fetch_holds_no_database_transaction(monkeypatch):
     monkeypatch.setattr("sentinel.ingest.session_scope", watched_scope)
     run = run_collector(SlowHunter(), client=object())
     assert run.ok and events == ["fetch", "session"]
+
+
+@pytest.mark.parametrize("name", ["hojatkashfi2.workers.dev", "primebaskets.store", "mytkash.com", "sonalibanker.org"])
+def test_typos_inside_longer_words_are_ignored(name):
+    finding = analyze(name)
+    assert finding is None or not finding.reportable, finding
+
+
+@pytest.mark.parametrize("name", ["bkassh24.top", "prime-bnak-login.top", "bkash1-login.xyz"])
+def test_whole_word_typos_still_found(name):
+    finding = analyze(name)
+    assert finding and finding.reportable and finding.technique in ("typosquat", "exact")
+
+
+def test_stream_does_not_retry_an_empty_flush_every_message():
+    hunter = StreamHunter()
+    before = hunter.last_flush
+    assert hunter.flush() == 0 and hunter.last_flush >= before
+
+
+def test_recheck_drops_findings_the_detector_now_rejects(capsys):
+    from sentinel.collectors.base import RawIndicator
+    from sentinel.hunter.__main__ import recheck
+    from sentinel.indicators import IndicatorType
+
+    with session_scope() as session:
+        ingest_raw(session, "phishhunter", [
+            RawIndicator(IndicatorType.DOMAIN, "primebaskets.store", "phishhunter", confidence=70),
+            RawIndicator(IndicatorType.DOMAIN, "bkash-verify-login.top", "phishhunter", confidence=80),
+        ])
+        ingest_raw(session, "threatfox", [RawIndicator(IndicatorType.DOMAIN, "primebaskets.store", "threatfox", confidence=50)])
+    recheck()
+    with session_scope() as session:
+        kept = session.scalar(select(Indicator).where(Indicator.value == "primebaskets.store"))
+        assert [s.source for s in kept.sightings] == ["threatfox"]  # the feed's report stays
+        assert session.scalar(select(Indicator).where(Indicator.value == "bkash-verify-login.top"))
+    assert "1 kept, 1 removed" in capsys.readouterr().out

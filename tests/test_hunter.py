@@ -215,7 +215,11 @@ def test_recheck_drops_findings_the_detector_now_rejects(capsys):
             RawIndicator(IndicatorType.DOMAIN, "bkash-verify-login.top", "phishhunter", confidence=80),
         ])
         ingest_raw(session, "threatfox", [RawIndicator(IndicatorType.DOMAIN, "primebaskets.store", "threatfox", confidence=50)])
-    recheck()
+    from sentinel.hunter.__main__ import main as hunter_cli
+
+    assert hunter_cli(["recheck", "--dry-run"]) == 0  # through the real command line
+    assert "would be removed" in capsys.readouterr().out
+    assert hunter_cli(["recheck"]) == 0
     with session_scope() as session:
         kept = session.scalar(select(Indicator).where(Indicator.value == "primebaskets.store"))
         assert [s.source for s in kept.sightings] == ["threatfox"]  # the feed's report stays

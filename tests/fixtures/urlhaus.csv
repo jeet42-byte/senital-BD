@@ -1,0 +1,11 @@
+################################################################
+# abuse.ch URLhaus Database Dump (CSV - recent URLs only)      #
+# Last updated: 2026-11-23 10:00:00 (UTC)                      #
+################################################################
+# id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter
+"3400001","2026-11-23 09:41:12","http://103.4.145.10:41234/Mozi.m","online","2026-11-23 09:41:12","malware_download","elf,mozi","https://urlhaus.abuse.ch/url/3400001/","lrz_urlhaus"
+"3400002","2026-11-23 08:12:55","https://bkash-reward-bd.top/app/bKash_Bonus.apk","online","2026-11-23 08:12:55","malware_download","apk,android,smsspy","https://urlhaus.abuse.ch/url/3400002/","tester"
+"3400003","2026-11-20 13:02:10","http://evil-loader.ru/payload.exe","offline","2026-11-21 00:00:00","malware_download","exe,AgentTesla","https://urlhaus.abuse.ch/url/3400003/","tester"
+"3400004","2026-11-22 18:30:00","https://raw.githubusercontent.com/someone/repo/main/stealer.ps1","online","2026-11-22 18:30:00","malware_download","ps1","https://urlhaus.abuse.ch/url/3400004/","tester"
+"3400005","2026-11-22 18:30:00","http://192.168.1.10/bad.sh","online","2026-11-22 18:30:00","malware_download","sh","https://urlhaus.abuse.ch/url/3400005/","tester"
+"3400006","2026-11-22 18:30:00","not a url at all","online","2026-11-22 18:30:00","malware_download","","https://urlhaus.abuse.ch/url/3400006/","tester"

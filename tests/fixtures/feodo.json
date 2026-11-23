@@ -1,0 +1,6 @@
+[
+  {"ip_address": "185.220.101.45", "port": 443, "status": "online", "hostname": null, "as_number": 60729, "as_name": "ZWIEBELFREUNDE", "country": "DE", "first_seen": "2026-11-10 08:00:00", "last_online": "2026-11-23", "malware": "QakBot"},
+  {"ip_address": "103.4.145.10", "port": 8080, "status": "online", "hostname": null, "as_number": 58717, "as_name": "SUMMITCOMMUNICATIONS-BD", "country": "BD", "first_seen": "2026-11-15 11:00:00", "last_online": "2026-11-23", "malware": "Emotet"},
+  {"ip_address": "45.95.11.20", "port": 2222, "status": "offline", "hostname": null, "as_number": 1, "as_name": "X", "country": "NL", "first_seen": "2026-09-01 00:00:00", "last_online": "2026-09-15", "malware": "Pikabot"},
+  {"ip_address": "8.8.8.8", "port": 53, "status": "online", "hostname": null, "as_number": 15169, "as_name": "GOOGLE", "country": "US", "first_seen": "2026-11-01 00:00:00", "last_online": "2026-11-23", "malware": "Test"}
+]

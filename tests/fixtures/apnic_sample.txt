@@ -1,0 +1,8 @@
+2|apnic|20261123|99999|19830613|20261122|+1000
+apnic|*|ipv4|*|50000|summary
+apnic|BD|ipv4|103.4.144.0|1024|20100205|allocated
+apnic|BD|ipv4|114.130.0.0|65536|20100302|allocated
+apnic|BD|ipv4|202.4.96.0|768|20030101|assigned
+apnic|IN|ipv4|1.6.0.0|131072|20100101|allocated
+apnic|BD|ipv6|2400:1000::|32|20100101|allocated
+apnic|BD|ipv4|10.0.0.0|256|20100101|reserved

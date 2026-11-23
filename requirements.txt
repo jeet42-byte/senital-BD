@@ -1,0 +1,10 @@
+# Sentinel-BD runtime dependencies (Python 3.11+)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy==2.0.36
+psycopg[binary]==3.2.3      # PostgreSQL driver (Neon / production)
+httpx==0.28.1
+pydantic-settings==2.7.0
+
+# Tests
+pytest==8.3.4

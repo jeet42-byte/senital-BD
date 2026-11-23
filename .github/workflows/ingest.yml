@@ -1,0 +1,45 @@
+name: Collect threat feeds (every 6 hours)
+
+# Downloads the public feeds, scores the indicators and writes them to the
+# production database. Needs repository secrets:
+#   DATABASE_URL       PostgreSQL connection string (e.g. Neon)
+#   ABUSECH_AUTH_KEY   free key from https://auth.abuse.ch (recommended)
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ABUSECH_AUTH_KEY: ${{ secrets.ABUSECH_AUTH_KEY }}
+    steps:
+      - name: Require a database
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Add the DATABASE_URL repository secret first."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Refresh Bangladeshi IP ranges (APNIC)
+        # A failed refresh only means BD-space tagging is skipped this run.
+        continue-on-error: true
+        run: python -m sentinel.bd update
+      - name: Collect feeds
+        run: python -m sentinel.ingest

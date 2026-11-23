@@ -225,3 +225,11 @@ def test_recheck_drops_findings_the_detector_now_rejects(capsys):
         assert [s.source for s in kept.sightings] == ["threatfox"]  # the feed's report stays
         assert session.scalar(select(Indicator).where(Indicator.value == "bkash-verify-login.top"))
     assert "1 kept, 1 removed" in capsys.readouterr().out
+
+
+def test_shared_platforms_are_never_the_reported_domain():
+    host = "bkash-login-verify.s3-website.ap-south-1.amazonaws.com"
+    finding = analyze(host)
+    assert finding and finding.reportable and finding.indicator == host
+    assert analyze("amazonaws.com") is None
+    assert analyze("bkash.com.login.sharepoint.com") is None or analyze("bkash.com.login.sharepoint.com").indicator != "sharepoint.com"

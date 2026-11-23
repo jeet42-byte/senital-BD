@@ -30,7 +30,7 @@ from functools import lru_cache
 
 import tldextract
 
-from sentinel.allowlist import USER_PLATFORMS, is_official_bd_domain
+from sentinel.allowlist import SHARED_PLATFORMS, USER_PLATFORMS, is_allowlisted_domain, is_official_bd_domain
 from sentinel.indicators import normalize_domain
 
 # token -> brand. Tokens are matched against the name with separators removed.
@@ -194,11 +194,16 @@ def _skeletons(label: str) -> tuple[str, bool]:
 
 def analyze(hostname: str) -> Finding | None:
     domain = normalize_domain(hostname)
-    if domain is None or is_official_bd_domain(domain):
+    if domain is None or is_official_bd_domain(domain) or domain in SHARED_PLATFORMS | USER_PLATFORMS:
         return None
 
     parts = _extract(domain)
     registrable = parts.registered_domain or domain
+    # On shared infrastructure (amazonaws.com, sharepoint.com...) the
+    # registrable domain belongs to the provider, not the attacker: report
+    # the exact hostname instead, never the platform.
+    if is_allowlisted_domain(registrable):
+        registrable = domain
     name = parts.domain           # e.g. "bkash-verify" in bkash-verify.com
     sub = parts.subdomain         # e.g. "bkash.com" in bkash.com.secure-login.top
 

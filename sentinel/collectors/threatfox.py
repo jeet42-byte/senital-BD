@@ -1,5 +1,8 @@
 """ThreatFox (abuse.ch): community-submitted IOCs, last 48 hours.
 
+Since October 2026 the export needs a free abuse.ch Auth-Key in the URL path;
+the old keyless https://threatfox.abuse.ch/export/json/recent/ answers 410.
+
 JSON object keyed by IOC id; each value is a list holding one record with
 ioc_value, ioc_type, threat_type, malware_printable, first_seen_utc,
 last_seen_utc, confidence_level, reference and tags.
@@ -25,8 +28,7 @@ TYPE_MAP = {
 
 class ThreatFoxCollector(Collector):
     name = "threatfox"
-    url = "https://threatfox.abuse.ch/export/json/recent/"
-    sends_abusech_key = True
+    url = "https://threatfox-api.abuse.ch/v2/files/exports/{auth_key}/recent.json"
 
     def parse(self, text: str) -> Iterable[RawIndicator]:
         data = json.loads(text)

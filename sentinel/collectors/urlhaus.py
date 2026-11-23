@@ -1,5 +1,8 @@
 """URLhaus (abuse.ch): URLs distributing malware, last 30 days.
 
+Since October 2026 the export needs a free abuse.ch Auth-Key in the URL path;
+the old keyless https://urlhaus.abuse.ch/downloads/csv_recent/ answers 410.
+
 CSV columns: id, dateadded, url, url_status, last_online, threat, tags,
 urlhaus_link, reporter. Lines starting with '#' are comments.
 """
@@ -16,13 +19,12 @@ from sentinel.indicators import IndicatorType
 
 class UrlhausCollector(Collector):
     name = "urlhaus"
-    url = "https://urlhaus.abuse.ch/downloads/csv_recent/"
-    sends_abusech_key = True
+    url = "https://urlhaus-api.abuse.ch/v2/files/exports/{auth_key}/recent.csv"
 
     def parse(self, text: str) -> Iterable[RawIndicator]:
         rows = (line for line in io.StringIO(text) if line.strip() and not line.startswith("#"))
         for row in csv.reader(rows):
-            if len(row) < 8:
+            if len(row) < 8 or row[0].strip().lower() == "id":  # header row
                 continue
             _id, added, url, status, last_online, threat, tags, link = row[:8]
             first_seen = parse_time(added)

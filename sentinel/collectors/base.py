@@ -7,9 +7,12 @@ offline runs) can feed it saved files.
 
 from __future__ import annotations
 
+import io
+import zipfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 import httpx
 
@@ -34,10 +37,20 @@ class RawIndicator:
     country: str | None = None
 
 
+class FeedError(Exception):
+    """A feed could not be fetched. The message never contains a secret."""
+
+
 class Collector:
     name: str = ""
+    # May contain "{auth_key}": abuse.ch's keyed exports take the key in the
+    # URL path, and answer 404 when it is sent as a header instead.
     url: str = ""
     sends_abusech_key: bool = False
+
+    @property
+    def needs_key_in_path(self) -> bool:
+        return "{auth_key}" in self.url
 
     def headers(self) -> dict[str, str]:
         settings = get_settings()
@@ -46,13 +59,49 @@ class Collector:
             headers["Auth-Key"] = settings.ABUSECH_AUTH_KEY
         return headers
 
+    def build_url(self) -> str:
+        if not self.needs_key_in_path:
+            return self.url
+        key = get_settings().ABUSECH_AUTH_KEY
+        if not key:
+            raise FeedError(f"{self.name} needs ABUSECH_AUTH_KEY (free at https://auth.abuse.ch)")
+        # Quoted so a key containing / ? # % cannot change the path.
+        return self.url.format(auth_key=quote(key, safe=""))
+
+    def redact(self, text: str) -> str:
+        """Remove the key from anything that may be logged or stored."""
+        key = get_settings().ABUSECH_AUTH_KEY
+        if key:
+            text = text.replace(quote(key, safe=""), "<AUTH-KEY>").replace(key, "<AUTH-KEY>")
+        return text
+
     def fetch(self, client: httpx.Client) -> str:
-        response = client.get(self.url, headers=self.headers())
-        response.raise_for_status()
-        return response.text
+        url = self.build_url()
+        try:
+            response = client.get(url, headers=self.headers())
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            hint = " (check ABUSECH_AUTH_KEY)" if exc.response.status_code in (401, 403) else ""
+            raise FeedError(
+                f"{self.name}: HTTP {exc.response.status_code} from {self.redact(url)}{hint}"
+            ) from None
+        except httpx.HTTPError as exc:
+            raise FeedError(f"{self.name}: {type(exc).__name__}: {self.redact(str(exc))}") from None
+        return decode_body(response.content)
 
     def parse(self, text: str) -> Iterable[RawIndicator]:
         raise NotImplementedError
+
+
+def decode_body(content: bytes) -> str:
+    """Feed text; some abuse.ch exports are served as a one-file ZIP."""
+    if content[:4] == b"PK\x03\x04":
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            names = [n for n in archive.namelist() if not n.endswith("/")]
+            if not names:
+                raise FeedError("feed returned an empty ZIP archive")
+            content = archive.read(names[0])
+    return content.decode("utf-8", errors="replace")
 
 
 def parse_time(value: str | None) -> datetime | None:

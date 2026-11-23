@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from sentinel.bd import bd_reasons
 from sentinel.collectors import COLLECTORS, RawIndicator
+from sentinel.collectors.base import FeedError
 from sentinel.config import get_settings
 from sentinel.db import init_db, session_scope
 from sentinel.indicators import IndicatorType, normalize
@@ -176,8 +177,12 @@ def run_collector(name: str, client: httpx.Client | None = None, text: str | Non
             run.ok = True
         except Exception as exc:  # one broken feed must not stop the others
             session.rollback()
-            log.exception("%s failed", name)
-            run = FeedRun(source=name, ok=False, error=f"{type(exc).__name__}: {exc}"[:2000])
+            if isinstance(exc, FeedError):
+                message = str(exc)  # already free of secrets; no traceback needed
+            else:
+                message = collector.redact(f"{type(exc).__name__}: {exc}")
+                log.error("%s failed: %s", name, message, exc_info=True)
+            run = FeedRun(source=name, ok=False, error=message[:2000])
             session.add(run)
         run.finished_at = datetime.now(timezone.utc)
     log.info(
@@ -197,6 +202,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    # httpx logs every request URL at INFO, and abuse.ch URLs contain the key.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     init_db()
 
     if args.rescore_only:

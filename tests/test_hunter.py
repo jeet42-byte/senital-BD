@@ -90,13 +90,13 @@ def test_crtsh_fetch_survives_one_failing_token_but_not_all():
         return httpx.Response(200, text=fixture_text("crtsh.json"))
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        text = CrtShHunter(["bkash", "nagad"], pause=0).fetch(client)
+        text = CrtShHunter(["bkash", "nagad"], pause=0, retry_waits=(0,)).fetch(client)
     assert len(json.loads(text)) == 6
     assert "q=%25bkash%25" in str(calls[0]) and "exclude=expired" in str(calls[0])
 
     with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503))) as client:
         with pytest.raises(FeedError, match="every token"):
-            CrtShHunter(["bkash", "nagad"], pause=0).fetch(client)
+            CrtShHunter(["bkash", "nagad"], pause=0, retry_waits=(0,)).fetch(client)
 
 
 def test_findings_become_scored_bd_indicators():
@@ -150,3 +150,14 @@ def test_new_columns_are_added_to_an_existing_database(tmp_path):
             "first_seen DATETIME, last_seen DATETIME, confidence INTEGER, reference TEXT)"))
     db.init_db(url)
     assert "note" in {c["name"] for c in inspect(create_engine(url)).get_columns("sighting")}
+
+
+def test_crtsh_retries_a_busy_answer():
+    answers = iter([httpx.Response(429), httpx.Response(502), httpx.Response(200, text="[]")])
+    with httpx.Client(transport=httpx.MockTransport(lambda r: next(answers))) as client:
+        assert CrtShHunter(["bkash"], pause=0, retry_waits=(0, 0)).fetch(client) == "[]"
+
+
+def test_backfill_window_is_configurable():
+    old = list(CrtShHunter(lookback_days=90).parse(fixture_text("crtsh.json"), now=NOW))
+    assert "bkash-login-verify.xyz" in {r.value for r in old}

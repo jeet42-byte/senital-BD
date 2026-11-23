@@ -32,15 +32,24 @@ log = logging.getLogger(__name__)
 
 LOOKBACK_DAYS = 7
 PAUSE_SECONDS = 3.0
+RETRY_WAITS = (10.0, 30.0)
 
 
 class CrtShHunter(Collector):
     name = "phishhunter"
     url = "https://crt.sh/"
 
-    def __init__(self, tokens: Iterable[str] = SEARCH_TOKENS, pause: float = PAUSE_SECONDS):
+    def __init__(
+        self,
+        tokens: Iterable[str] = SEARCH_TOKENS,
+        pause: float = PAUSE_SECONDS,
+        lookback_days: int = LOOKBACK_DAYS,
+        retry_waits: tuple[float, ...] = RETRY_WAITS,
+    ):
         self.tokens = tuple(tokens)
         self.pause = pause
+        self.lookback_days = lookback_days
+        self.retry_waits = retry_waits
 
     def query_url(self, token: str) -> str:
         return f"https://crt.sh/?q={quote('%' + token + '%')}&output=json&exclude=expired&deduplicate=Y"
@@ -52,33 +61,65 @@ class CrtShHunter(Collector):
         for i, token in enumerate(self.tokens):
             if i:
                 time.sleep(self.pause)
-            try:
-                response = client.get(self.query_url(token), headers=self.headers(), timeout=120)
-                response.raise_for_status()
-                batch = response.json() if response.text.strip() else []
-                entries.extend(batch)
-                log.info("crt.sh %-12s %d certificates", token, len(batch))
-            except (httpx.HTTPError, ValueError) as exc:
+            batch = self._query(client, token)
+            if batch is None:
                 failures.append(token)
-                log.warning("crt.sh %-12s failed: %s", token, type(exc).__name__)
-        if failures and len(failures) == len(self.tokens):
+            else:
+                entries.extend(batch)
+        if failures:
+            log.warning("crt.sh gave no answer for: %s", ", ".join(failures))
+        if len(failures) == len(self.tokens):
             raise FeedError(f"crt.sh failed for every token ({', '.join(failures)})")
         return json.dumps(entries)
 
+    def _query(self, client: httpx.Client, token: str) -> list[dict] | None:
+        """One token, retried: crt.sh often answers 429/5xx when busy."""
+        for attempt, wait in enumerate((*self.retry_waits, None), start=1):
+            try:
+                response = client.get(self.query_url(token), headers=self.headers(), timeout=120)
+                if response.status_code == 200:
+                    batch = response.json() if response.text.strip() else []
+                    log.info("crt.sh %-12s %d certificates", token, len(batch))
+                    return batch
+                problem = f"HTTP {response.status_code}"
+            except (httpx.HTTPError, ValueError) as exc:
+                problem = type(exc).__name__
+            if wait is None:
+                log.warning("crt.sh %-12s gave up after %d attempts (%s)", token, attempt, problem)
+                return None
+            log.info("crt.sh %-12s %s, retrying in %ss", token, problem, wait)
+            time.sleep(wait)
+        return None
+
     def parse(self, text: str, now: datetime | None = None) -> Iterable[RawIndicator]:
         now = now or datetime.now(timezone.utc)
-        cutoff = now - timedelta(days=LOOKBACK_DAYS)
-        for entry in json.loads(text):
+        cutoff = now - timedelta(days=self.lookback_days)
+        entries = json.loads(text)
+        in_window = names_checked = near_misses = reported = 0
+        for entry in entries:
             logged = parse_time(entry.get("entry_timestamp", "")[:19].replace("T", " ")) or parse_time(entry.get("not_before"))
             if logged and logged < cutoff:
                 continue
+            in_window += 1
             names = {n.strip() for n in f"{entry.get('common_name', '')}\n{entry.get('name_value', '')}".splitlines()}
             for name in names:
-                finding = analyze(name) if name else None
-                if finding is None or not finding.reportable:
+                if not name:
                     continue
+                names_checked += 1
+                finding = analyze(name)
+                if finding is None:
+                    continue
+                if not finding.reportable:
+                    near_misses += 1
+                    continue
+                reported += 1
                 yield finding_to_raw(finding, self.name, first_seen=logged,
                                      reference=f"https://crt.sh/?id={entry['id']}" if entry.get("id") else None)
+        log.info(
+            "crt.sh: %d certificates, %d in the last %d days, %d names checked, "
+            "%d lookalikes reported, %d below threshold",
+            len(entries), in_window, self.lookback_days, names_checked, reported, near_misses,
+        )
 
 
 def finding_to_raw(finding, source: str, first_seen: datetime | None = None, reference: str | None = None) -> RawIndicator:

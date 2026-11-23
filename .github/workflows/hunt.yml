@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: "41 */3 * * *"
   workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days back to look (use 90 once to backfill)"
+        default: "7"
 
 permissions:
   contents: read
@@ -19,7 +23,7 @@ concurrency:
 jobs:
   hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
@@ -36,4 +40,6 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - name: Hunt for lookalike domains
-        run: python -m sentinel.hunter crtsh
+        env:
+          DAYS: ${{ inputs.days || '7' }}
+        run: python -m sentinel.hunter crtsh --days "$DAYS"

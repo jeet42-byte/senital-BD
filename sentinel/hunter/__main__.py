@@ -1,7 +1,7 @@
 """Phishing hunter command line.
 
     python -m sentinel.hunter crtsh                  # search certificate logs once
-    python -m sentinel.hunter crtsh --tokens bkash nagad
+    python -m sentinel.hunter crtsh --tokens bkash nagad --days 90   # backfill
     python -m sentinel.hunter check bkash-verify.top nag4d.app   # try the detector
     python -m sentinel.hunter stream --url ws://127.0.0.1:8080/domains-only
 """
@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     crtsh = commands.add_parser("crtsh", help="search certificate logs for lookalike domains")
     crtsh.add_argument("--tokens", nargs="+", default=list(SEARCH_TOKENS))
+    crtsh.add_argument("--days", type=int, default=7, help="how far back to look (default 7)")
     check = commands.add_parser("check", help="run the detector on names you type")
     check.add_argument("names", nargs="+")
     stream = commands.add_parser("stream", help="watch a CertStream websocket continuously")
@@ -56,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
 
     init_db()
     with httpx.Client(timeout=get_settings().HTTP_TIMEOUT_SECONDS, follow_redirects=True) as client:
-        run = run_collector(CrtShHunter(args.tokens), client=client)
+        run = run_collector(CrtShHunter(args.tokens, lookback_days=args.days), client=client)
     with session_scope() as session:
         rescore_all(session)
     return 0 if run.ok else 1

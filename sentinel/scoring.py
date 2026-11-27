@@ -28,6 +28,10 @@ SOURCE_RELIABILITY: dict[str, float] = {
     "urlhaus": 0.85,
     "threatfox": 0.80,     # community submissions; also gives its own confidence
     "openphish": 0.75,
+    "spamhaus-drop": 0.95,
+    "bgd-cirt": 0.90,       # indicators Bangladesh's national CIRT published as malicious  # hijacked or criminal-run networks; very few false positives
+    "blocklist.de": 0.70,   # IPs that attacked its sensors in the last 48 hours
+    "cins": 0.65,           # CINS Army: poor-reputation IPs from Sentinel IPS sensors
     # Lookalike names found by Sentinel-BD itself. A name alone is a
     # suspicion, not proof, so its weight is modest; its own 0-100 risk score
     # scales it further, and a feed confirming the domain lifts the total.
@@ -40,6 +44,7 @@ DEFAULT_RELIABILITY = 0.50
 
 HALF_LIFE_DAYS: dict[IndicatorType, float | None] = {
     IndicatorType.IPV4: 14,
+    IndicatorType.CIDR: 30,
     IndicatorType.URL: 30,
     IndicatorType.DOMAIN: 45,
     IndicatorType.MD5: None,

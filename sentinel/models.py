@@ -13,6 +13,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -112,6 +113,61 @@ class Resolution(Base):
     ip: Mapped[str] = mapped_column(String(45), index=True)
     first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Vulnerability(Base):
+    """A CVE worth attention: exploited in the wild (CISA KEV), likely to be
+    exploited soon (high EPSS), or named in a Bangladeshi CIRT advisory."""
+
+    __tablename__ = "vulnerability"
+
+    cve_id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    vendor: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    product: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    in_kev: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    kev_added: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    kev_due: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ransomware_use: Mapped[bool] = mapped_column(Boolean, default=False)
+    epss: Mapped[float | None] = mapped_column(Float, nullable=True)
+    epss_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bd_advisories: Mapped[int] = mapped_column(Integer, default=0)
+    priority: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Advisory(Base):
+    """A security advisory from Bangladesh's national CIRT."""
+
+    __tablename__ = "advisory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    url: Mapped[str] = mapped_column(String(512), unique=True)
+    title: Mapped[str] = mapped_column(Text)
+    published: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="bgd-cirt")
+    cves: Mapped[list] = mapped_column(JSON, default=list)
+    indicator_count: Mapped[int] = mapped_column(Integer, default=0)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RansomwareVictim(Base):
+    """A victim a ransomware gang announced publicly. Metadata only; victims
+    are never indicators."""
+
+    __tablename__ = "ransomware_victim"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(40), unique=True)
+    victim: Mapped[str] = mapped_column(String(300))
+    group: Mapped[str] = mapped_column(String(100), index=True)
+    country: Mapped[str | None] = mapped_column(String(2), nullable=True, index=True)
+    sector: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    attack_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    discovered: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    south_asia: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
 
 class HoneypotDaily(Base):

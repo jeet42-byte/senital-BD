@@ -69,6 +69,15 @@ class BdIpRanges:
     def __len__(self) -> int:
         return len(self._starts)
 
+    def overlaps(self, cidr: str) -> bool:
+        try:
+            net = ipaddress.IPv4Network(cidr, strict=False)
+        except ValueError:
+            return False
+        start, end = int(net.network_address), int(net.broadcast_address)
+        i = bisect.bisect_right(self._starts, end) - 1
+        return i >= 0 and self._ends[i] >= start
+
     def __contains__(self, ip: str) -> bool:
         try:
             value = int(ipaddress.IPv4Address(ip))
@@ -145,6 +154,8 @@ def bd_reasons(
         ip_value = value if kind is IndicatorType.IPV4 else None
 
     if ip_value and ip_value in ranges:
+        reasons.append("ip:bd-space")
+    if kind is IndicatorType.CIDR and ranges.overlaps(value):
         reasons.append("ip:bd-space")
     if country and country.upper() == "BD":
         reasons.append("geo:BD")

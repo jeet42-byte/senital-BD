@@ -15,6 +15,9 @@ Read-only: data only enters through the ingest job.
   GET /api/v1/honeypot            what attackers did on Sentinel-BD's own sensors
   GET /api/v1/graph?type=&value=  an indicator's connections (shared infrastructure)
   GET /api/v1/correlations        notable links, especially across sources
+  GET /api/v1/vulnerabilities     exploited / likely-exploited CVEs, by priority
+  GET /api/v1/advisories          Bangladesh CIRT advisories
+  GET /api/v1/ransomware          ransomware gangs and victims, South Asia first
   GET /taxii2/                    TAXII 2.1 server (read-only)
   GET /feeds/{ip|domain|url|hash}.txt   blocklists for firewalls
   GET /feeds/rpz.zone             DNS firewall zone
@@ -24,6 +27,7 @@ Read-only: data only enters through the ingest job.
 
 from __future__ import annotations
 
+import ipaddress
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -49,10 +53,15 @@ from sentinel.api.schemas import (
     IndicatorOut,
     IndicatorPage,
     LookupResult,
+    AdvisoryOut,
+    RansomwareStats,
     Ranked,
+    VictimOut,
     ScoreExplanation,
     Stats,
     TimelinePoint,
+    VulnerabilityOut,
+    VulnerabilityPage,
 )
 from sentinel.api.taxii import router as taxii_router
 from sentinel.db import get_session, init_db
@@ -67,7 +76,18 @@ from sentinel.exporters import (
     to_stix_bundle,
 )
 from sentinel.indicators import IndicatorType, guess_type, normalize
-from sentinel.models import FeedRun, HoneypotDaily, Indicator, Relation, Resolution, Sighting
+from sentinel.models import (
+    Advisory,
+    FeedRun,
+    HoneypotDaily,
+    Indicator,
+    RansomwareVictim,
+    Relation,
+    Resolution,
+    Sighting,
+    Vulnerability,
+)
+from sentinel.vulns import priority_parts
 from sentinel.scoring import Evidence, explain_score
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -186,6 +206,19 @@ def _find(session: Session, kind: IndicatorType, value: str) -> tuple[str | None
     )
 
 
+def _containing_ranges(session: Session, ip: str) -> list[Indicator]:
+    """Listed IP ranges containing this address (a few thousand at most)."""
+    address = ipaddress.IPv4Address(ip)
+    found = []
+    for row in session.scalars(select(Indicator).where(Indicator.type == IndicatorType.CIDR.value)):
+        try:
+            if address in ipaddress.IPv4Network(row.value):
+                found.append(row)
+        except ValueError:
+            continue
+    return sorted(found, key=lambda r: -r.score)[:5]
+
+
 def _explain(indicator: Indicator) -> ScoreExplanation:
     evidence = [Evidence(s.source, s.confidence) for s in indicator.sightings]
     return ScoreExplanation(
@@ -203,7 +236,9 @@ def lookup(
     if kind is None:
         return LookupResult(query=value, type=None, normalized=None, found=False)
     normalized, indicator = _find(session, kind, value)
+    ranges = _containing_ranges(session, normalized) if kind is IndicatorType.IPV4 and normalized else []
     return LookupResult(
+        ranges=[IndicatorOut.model_validate(r) for r in ranges],
         query=value,
         type=kind.value,
         normalized=normalized,
@@ -439,6 +474,100 @@ def correlations(
                                cross_source=cross, own_sensor=own_sensor))
     out.sort(key=lambda c: (c.own_sensor, c.cross_source, max(c.src.score, c.dst.score), c.last_seen), reverse=True)
     return out[:limit]
+
+
+@app.get("/api/v1/vulnerabilities", response_model=VulnerabilityPage)
+def vulnerabilities(
+    session: SessionDep,
+    view: Literal["priority", "kev", "likely", "bd", "ransomware"] = "priority",
+    q: Annotated[str | None, Query(max_length=100)] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 25,
+) -> VulnerabilityPage:
+    query = select(Vulnerability)
+    if view == "kev":
+        query = query.where(Vulnerability.in_kev.is_(True))
+    elif view == "likely":
+        query = query.where(Vulnerability.in_kev.is_(False), Vulnerability.epss.is_not(None))
+    elif view == "bd":
+        query = query.where(Vulnerability.bd_advisories > 0)
+    elif view == "ransomware":
+        query = query.where(Vulnerability.ransomware_use.is_(True))
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.where(or_(Vulnerability.cve_id.ilike(like), Vulnerability.vendor.ilike(like),
+                                Vulnerability.product.ilike(like), Vulnerability.name.ilike(like)))
+    order = (Vulnerability.kev_added.desc().nulls_last(),) if view == "kev" else (
+        Vulnerability.epss.desc().nulls_last(),) if view == "likely" else ()
+    rows = session.scalars(query.order_by(*order, Vulnerability.priority.desc(), Vulnerability.cve_id.desc())
+                           .limit(limit)).all()
+
+    def count(*where) -> int:
+        q2 = select(func.count()).select_from(Vulnerability)
+        for w in where:
+            q2 = q2.where(w)
+        return session.scalar(q2) or 0
+
+    now = datetime.now(timezone.utc)
+    items = []
+    for v in rows:
+        out = VulnerabilityOut.model_validate(v)
+        out.priority_parts = priority_parts(v, now)
+        # Indicators the feeds tagged with this CVE (ThreatFox often does).
+        out.indicator_count = session.scalar(
+            select(func.count(Indicator.id)).where(cast(Indicator.tags, String).contains(f'"{v.cve_id.lower()}"'))
+        ) or 0
+        items.append(out)
+    return VulnerabilityPage(
+        total=count(),
+        kev_total=count(Vulnerability.in_kev.is_(True)),
+        kev_last_30_days=count(Vulnerability.kev_added >= now - timedelta(days=30)),
+        ransomware_linked=count(Vulnerability.ransomware_use.is_(True)),
+        in_bd_advisories=count(Vulnerability.bd_advisories > 0),
+        items=items,
+    )
+
+
+@app.get("/api/v1/advisories", response_model=list[AdvisoryOut])
+def advisories(session: SessionDep, limit: Annotated[int, Query(ge=1, le=100)] = 10) -> list[AdvisoryOut]:
+    rows = session.scalars(select(Advisory).order_by(Advisory.published.desc().nulls_last(), Advisory.id.desc())
+                           .limit(limit))
+    return [AdvisoryOut.model_validate(r) for r in rows]
+
+
+@app.get("/api/v1/ransomware", response_model=RansomwareStats)
+def ransomware(
+    session: SessionDep,
+    days: Annotated[int, Query(ge=7, le=365)] = 90,
+) -> RansomwareStats:
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    window = RansomwareVictim.attack_date >= since
+
+    def ranked(column, *where, n=8) -> list[Ranked]:
+        query = select(column, func.count()).where(window, column.is_not(None), *where)
+        rows = session.execute(query.group_by(column).order_by(func.count().desc(), column).limit(n))
+        return [Ranked(value=str(v), count=c) for v, c in rows]
+
+    def count(*where) -> int:
+        return session.scalar(select(func.count(RansomwareVictim.id)).where(window, *where)) or 0
+
+    south = RansomwareVictim.south_asia.is_(True)
+    recent = session.scalars(
+        select(RansomwareVictim).where(window, south)
+        .order_by(RansomwareVictim.attack_date.desc(), RansomwareVictim.id.desc()).limit(12)
+    )
+    return RansomwareStats(
+        days=days,
+        total=count(),
+        south_asia=count(south),
+        bangladesh=count(RansomwareVictim.country == "BD"),
+        groups=ranked(RansomwareVictim.group),
+        south_asia_groups=ranked(RansomwareVictim.group, south),
+        countries={r.value: r.count for r in ranked(RansomwareVictim.country, south, n=10)},
+        sectors=ranked(RansomwareVictim.sector, south, n=6),
+        recent=[VictimOut.model_validate(v) for v in recent],
+        last_update=session.scalar(select(func.max(FeedRun.finished_at)).where(
+            FeedRun.source == "ransomware.live", FeedRun.ok.is_(True))),
+    )
 
 
 @app.get("/api/v1/feed-runs", response_model=list[FeedRunOut])

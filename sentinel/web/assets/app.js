@@ -69,7 +69,7 @@ function shortDate(isoDay) {
 /** hxxp://evil[.]com/path - readable, but not clickable or resolvable by accident. */
 function defang(type, value) {
   const lastDot = (text) => text.replace(/\.(?=[^.]*$)/, "[.]");
-  if (type === "ipv4" || type === "domain") return lastDot(value);
+  if (type === "ipv4" || type === "domain" || type === "cidr") return lastDot(value);
   if (type === "url") {
     const m = value.match(/^([a-z]+):\/\/([^/?#]+)(.*)$/i);
     if (!m) return value;
@@ -79,7 +79,7 @@ function defang(type, value) {
   return value;
 }
 
-const TYPE_LABEL = { ipv4: "IP", domain: "Domain", url: "URL", sha256: "SHA-256", sha1: "SHA-1", md5: "MD5" };
+const TYPE_LABEL = { ipv4: "IP", cidr: "IP range", domain: "Domain", url: "URL", sha256: "SHA-256", sha1: "SHA-1", md5: "MD5" };
 const SOURCES = {
   feodotracker: ["FT", "Feodo Tracker"],
   urlhaus: ["UH", "URLhaus"],
@@ -87,6 +87,13 @@ const SOURCES = {
   openphish: ["OP", "OpenPhish"],
   phishhunter: ["PH", "Phishing hunter"],
   honeypot: ["HP", "Sentinel-BD honeypot"],
+  "blocklist.de": ["BL", "blocklist.de"],
+  cins: ["CI", "CINS Army"],
+  "spamhaus-drop": ["SD", "Spamhaus DROP"],
+  "bgd-cirt": ["CR", "BGD e-GOV CIRT"],
+  "cisa-kev": ["KV", "CISA KEV"],
+  epss: ["EP", "FIRST EPSS"],
+  "ransomware.live": ["RW", "ransomware.live"],
 };
 const sourceName = (key) => (SOURCES[key] || [key.slice(0, 2).toUpperCase(), key])[1];
 const sourceAbbr = (key) => (SOURCES[key] || [key.slice(0, 2).toUpperCase(), key])[0];
@@ -96,6 +103,7 @@ const REASON_TEXT = {
   "impersonates": (v) => [`Imitates ${v}`, `The name looks like a copy of ${v}`],
   "ip": () => ["Bangladeshi IP space", "Address allocated to Bangladesh by APNIC"],
   "geo": () => ["Located in Bangladesh", "The reporting feed places it in Bangladesh"],
+  "cirt": () => ["Warned by BGD e-GOV CIRT", "Published in an advisory by Bangladesh's national CIRT"],
 };
 function reasonInfo(reason) {
   const [kind, value] = reason.split(":");
@@ -572,6 +580,18 @@ async function runLookup(value) {
         h("p", {}, "Try an IPv4 address, a domain, a URL, or an MD5, SHA-1 or SHA-256 hash.")));
       return;
     }
+    if (!result.found && result.ranges?.length) {
+      const range = result.ranges[0];
+      root.dataset.tone = range.severity === "high" ? "bad" : "warn";
+      root.append(ring(range.score, range.severity), h("div", { style: { minWidth: 0 } },
+        h("h3", {}, "Inside a listed network range"),
+        h("p", {}, `${defang("cidr", range.value)} is on ${range.sightings.map((sg) => sourceName(sg.source)).join(" and ")}` +
+          (range.threat_type ? ` (${range.threat_type.replaceAll("_", " ")})` : "") +
+          ". The address itself hasn't been reported, but its whole network is listed."),
+        h("div", { class: "value" }, `${TYPE_LABEL[result.type]} · ${defang(result.type, result.normalized)}`)),
+        h("button", { type: "button", class: "btn", onclick: () => openDrawer(range) }, "About this range"));
+      return;
+    }
     if (!result.found) {
       root.dataset.tone = "clean";
       root.append(checkIcon("✓"), h("div", {},
@@ -593,6 +613,7 @@ async function runLookup(value) {
           ` · last seen ${ago(item.last_seen)}`,
         ].join("")),
         item.bd_relevant ? h("p", {}, h("span", { class: "badge-bd" }, "BD"), " ", item.bd_reasons.map((r) => reasonInfo(r)[0]).join(" · ")) : null,
+        result.ranges?.length ? h("p", {}, `Also inside listed range ${defang("cidr", result.ranges[0].value)}`) : null,
         h("div", { class: "value" }, defang(item.type, item.value))),
       h("button", { type: "button", class: "btn", onclick: () => openDrawer(item, result.explanation) }, "Why this score?"),
     );
@@ -893,17 +914,18 @@ async function loadLinks() {
 }
 
 /** Only well-known reference sites become links; anything else stays text. */
-function referenceLink(ref) {
+function referenceLink(ref, text = null) {
   if (!ref) return "–";
   try {
     const url = new URL(ref);
-    const trusted = ["abuse.ch", "openphish.com", "crt.sh"].some((d) => url.hostname === d || url.hostname.endsWith(`.${d}`));
+    const trusted = ["abuse.ch", "openphish.com", "crt.sh", "spamhaus.org", "blocklist.de", "cinsscore.com", "cirt.gov.bd"]
+      .some((d) => url.hostname === d || url.hostname.endsWith(`.${d}`));
     if (url.protocol === "https:" && trusted) {
-      return h("a", { href: url.href, target: "_blank", rel: "noopener noreferrer" }, url.hostname);
+      return h("a", { href: url.href, target: "_blank", rel: "noopener noreferrer" }, text || url.hostname);
     }
-    return h("span", { class: "muted", title: "Unverified reference, not linked" }, url.hostname);
+    return h("span", { class: "muted", title: "Unverified reference, not linked" }, text || url.hostname);
   } catch {
-    return "–";
+    return text || "–";
   }
 }
 
@@ -1012,6 +1034,135 @@ function initBuilder() {
   $("#builder-bd").addEventListener("change", (e) => { builder.bd = e.target.checked; updateBuilder(); });
   $("#builder-copy").addEventListener("click", () => copy($("#builder-url").value, "Feed URL copied"));
   updateBuilder();
+}
+
+/* ------------------------------------------------------- vulnerabilities */
+
+const vulnState = { view: "priority", q: "" };
+const PART_TEXT = { exploited: "exploited in the wild", epss: "EPSS", ransomware: "ransomware use",
+  bd_advisory: "BD CIRT advisory", recent: "added recently" };
+
+async function loadVulns() {
+  for (const b of document.querySelectorAll("#vuln-views button")) b.setAttribute("aria-pressed", b.dataset.view === vulnState.view);
+  let page;
+  try {
+    page = await api("/api/v1/vulnerabilities", { view: vulnState.view, q: vulnState.q, limit: 15 });
+  } catch {
+    return;
+  }
+  const figs = clear($("#vuln-figures"));
+  for (const [value, label] of [[page.kev_total, "exploited in the wild"], [page.kev_last_30_days, "newly exploited, 30 days"],
+    [page.ransomware_linked, "used by ransomware"], [page.in_bd_advisories, "named by BD CIRT"]]) {
+    const num = h("span", { class: "num" }, "0");
+    animateNumber(num, value);
+    figs.append(h("div", { class: "vuln-figure" }, num, h("span", {}, label)));
+  }
+  const list = clear($("#vuln-list"));
+  if (!page.items.length) {
+    list.append(h("li", { class: "empty" }, page.total
+      ? "Nothing matches this view."
+      : "No vulnerability data yet. It arrives with the next collection run (CISA KEV, EPSS and BGD e-GOV CIRT)."));
+    return;
+  }
+  for (const v of page.items) {
+    const tone = v.priority >= 70 ? "high" : v.priority >= 40 ? "medium" : "low";
+    const detail = h("div", { class: "vuln-detail", hidden: true },
+      v.description ? h("p", {}, v.description) : null,
+      h("div", { class: "vuln-parts" }, Object.entries(v.priority_parts).filter(([, n]) => n)
+        .map(([k, n]) => h("span", {}, `+${n} ${PART_TEXT[k] || k}`))),
+      h("p", { class: "muted" }, [
+        v.kev_added ? `In KEV since ${new Date(v.kev_added).toLocaleDateString("en-GB")}` : "Not yet in KEV",
+        v.kev_due ? ` · US federal patch deadline ${new Date(v.kev_due).toLocaleDateString("en-GB")}` : "",
+        v.epss != null ? ` · EPSS ${(v.epss * 100).toFixed(1)}% (top ${(100 - v.epss_percentile * 100).toFixed(1)}%)` : "",
+        v.indicator_count ? ` · ${v.indicator_count} indicators tagged with it` : "",
+      ].join("")),
+      h("a", { href: `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(v.cve_id)}`, target: "_blank", rel: "noopener noreferrer" }, "Details on NVD"));
+    const toggle = h("button", { type: "button", "aria-expanded": "false", onclick: () => {
+      detail.hidden = !detail.hidden;
+      toggle.setAttribute("aria-expanded", String(!detail.hidden));
+    } },
+      h("span", { class: `vuln-prio prio-${tone}`, title: "Priority (0-100)" }, String(v.priority)),
+      h("span", { class: "vuln-main" },
+        h("span", { class: "vuln-id" }, v.cve_id), " ",
+        h("span", { class: "muted", style: { fontSize: "12px" } }, [v.vendor, v.product].filter(Boolean).join(" · ")),
+        h("div", { class: "vuln-name", title: v.name || "" }, v.name || "")),
+      h("span", { class: "vuln-tags" },
+        v.in_kev ? h("span", { class: "tag-kev" }, "Exploited") : null,
+        v.ransomware_use ? h("span", { class: "tag-rw" }, "Ransomware") : null,
+        v.bd_advisories ? h("span", { class: "tag-cirt" }, "BD CIRT") : null,
+        v.epss != null ? h("span", { class: "tag-epss", title: "Chance of exploitation in the next 30 days" }, `EPSS ${(v.epss * 100).toFixed(0)}%`) : null));
+    list.append(h("li", { class: "vuln" }, toggle, detail));
+  }
+}
+
+async function loadAdvisories() {
+  let items;
+  try {
+    items = await api("/api/v1/advisories", { limit: 8 });
+  } catch {
+    return;
+  }
+  const root = clear($("#adv-list"));
+  if (!items.length) {
+    root.append(h("li", { class: "empty" }, "No advisories collected yet."));
+    return;
+  }
+  for (const a of items) {
+    root.append(h("li", {},
+      h("div", { class: "adv-title" }, referenceLink(a.url, a.title)),
+      h("div", { class: "adv-meta" }, [
+        a.published ? new Date(a.published).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "",
+        a.cves.length ? ` · ${a.cves.slice(0, 3).join(", ")}${a.cves.length > 3 ? "…" : ""}` : "",
+        a.indicator_count ? ` · ${a.indicator_count} indicators` : "",
+      ].join(""))));
+  }
+}
+
+/* ----------------------------------------------------------- ransomware */
+
+const COUNTRY = { BD: "Bangladesh", IN: "India", PK: "Pakistan", LK: "Sri Lanka", NP: "Nepal", BT: "Bhutan", MV: "Maldives", AF: "Afghanistan" };
+
+async function loadRansomware() {
+  let r;
+  try {
+    r = await api("/api/v1/ransomware", { days: 90 });
+  } catch {
+    return;
+  }
+  const root = clear($("#ransom-body"));
+  if (!r.total) {
+    root.append(h("p", { class: "empty", style: { gridColumn: "1 / -1" } },
+      "No ransomware data yet. It arrives with the next collection run."));
+    return;
+  }
+  root.append(h("div", { class: "hp-figures" },
+    figure(r.total, "victims worldwide"), figure(r.south_asia, "in South Asia"), figure(r.bangladesh, "in Bangladesh")));
+
+  const bars = (title, items) => {
+    const max = Math.max(1, ...items.map((i) => i.count));
+    return h("div", { class: "hp-list" }, h("h3", {}, title),
+      items.length ? h("div", { class: "brands" }, items.map((i) => h("div", { class: "brand-row", style: { cursor: "default" } },
+        h("span", { class: "brand-row-name", title: i.value }, i.value),
+        h("span", { class: "brand-row-bar" }, h("span", { style: { width: `${(i.count / max) * 100}%` } })),
+        h("span", { class: "brand-row-count" }, fmt(i.count)))))
+        : h("p", { class: "muted" }, "None in this period"));
+  };
+  root.append(bars("Most active gangs worldwide", r.groups.slice(0, 6)), bars("Gangs hitting South Asia", r.south_asia_groups.slice(0, 6)));
+
+  const wide = h("div", { class: "hp-list ransom-wide" }, h("h3", {}, "Recent victims in South Asia"),
+    Object.keys(r.countries).length ? h("div", { class: "country-chips", style: { marginBottom: "10px" } },
+      Object.entries(r.countries).map(([cc, n]) => h("span", {}, COUNTRY[cc] || cc, h("b", {}, String(n))))) : null);
+  if (r.recent.length) {
+    wide.append(h("table", { class: "ransom-table" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Organisation"), h("th", {}, "Gang"), h("th", {}, "Country"), h("th", {}, "Sector"), h("th", {}, "Date"))),
+      h("tbody", {}, r.recent.map((v) => h("tr", {},
+        h("td", {}, v.victim), h("td", {}, v.group), h("td", {}, COUNTRY[v.country] || v.country || "–"),
+        h("td", { class: "muted" }, v.sector || "–"),
+        h("td", { class: "muted" }, v.attack_date ? ago(v.attack_date) : "–"))))));
+  } else {
+    wide.append(h("p", { class: "muted" }, "No South Asian victims announced in the last 90 days."));
+  }
+  root.append(wide);
 }
 
 /* ------------------------------------------------------------- honeypot */
@@ -1137,6 +1288,14 @@ function bindEvents() {
   $("#prev").addEventListener("click", () => setFilter({ offset: Math.max(0, state.offset - PAGE) }));
   $("#next").addEventListener("click", () => setFilter({ offset: state.offset + PAGE }));
   $("#scrim").addEventListener("click", closeDrawer);
+  for (const b of document.querySelectorAll("#vuln-views button")) {
+    b.addEventListener("click", () => { vulnState.view = b.dataset.view; loadVulns(); });
+  }
+  let vulnTimer = null;
+  $("#vuln-search").addEventListener("input", (e) => {
+    clearTimeout(vulnTimer);
+    vulnTimer = setTimeout(() => { vulnState.q = e.target.value.trim(); loadVulns(); }, 300);
+  });
   addEventListener("hashchange", () => { readHash(); syncControls(); loadTable(); });
 
   let resizeTimer = null;
@@ -1169,9 +1328,12 @@ function init() {
   loadTable();
   loadStream();
   loadHoneypot();
+  loadVulns();
+  loadAdvisories();
+  loadRansomware();
   renderExamples();
   // Collection runs every 6 hours; refreshing every 5 minutes is plenty.
-  setInterval(() => { loadStats(); loadStream(); loadHoneypot(); }, 5 * 60 * 1000);
+  setInterval(() => { loadStats(); loadStream(); loadHoneypot(); loadVulns(); loadRansomware(); }, 5 * 60 * 1000);
 }
 
 init();

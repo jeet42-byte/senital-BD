@@ -26,6 +26,14 @@
         <span class="brand-bn" lang="bn">বাংলাদেশ সাইবার হুমকি পর্যবেক্ষণ</span>
       </div>
     </div>
+    <nav class="sections" aria-label="Sections">
+      <a href="#explorer-title">Threats</a>
+      <a href="#vulns-title">Vulnerabilities</a>
+      <a href="#ransom-title">Ransomware</a>
+      <a href="#honeypot-title">Honeypot</a>
+      <a href="#links-title">Connections</a>
+      <a href="#builder-title">Blocklists</a>
+    </nav>
     <div class="status" id="status" aria-live="polite">
       <span class="status-dot" data-state="loading"></span>
       <span class="status-text">Connecting…</span><span class="status-detail"></span>
@@ -141,6 +149,51 @@
       </aside>
     </section>
 
+    <section class="row row-vulns">
+      <article class="panel vulns" aria-labelledby="vulns-title">
+        <header class="panel-head explorer-head">
+          <div>
+            <h2 id="vulns-title">Patch these first</h2>
+            <p class="sub">Vulnerabilities attacked in the wild (CISA KEV), likely to be attacked soon (EPSS), or named by Bangladesh's CIRT.</p>
+          </div>
+        </header>
+        <div class="vuln-figures" id="vuln-figures"></div>
+        <div class="explorer-tools">
+          <div class="seg" role="group" aria-label="Vulnerability view" id="vuln-views">
+            <button type="button" data-view="priority">Priority</button>
+            <button type="button" data-view="kev">Exploited now</button>
+            <button type="button" data-view="likely">Likely next</button>
+            <button type="button" data-view="bd">BD CIRT</button>
+            <button type="button" data-view="ransomware">Ransomware</button>
+          </div>
+          <label class="search">
+            <span class="visually-hidden">Filter vulnerabilities</span>
+            <input id="vuln-search" type="search" spellcheck="false" placeholder="CVE, vendor or product: fortinet, CVE-2024-3400">
+          </label>
+        </div>
+        <ol class="vuln-list" id="vuln-list"></ol>
+      </article>
+      <aside class="panel advisories" aria-labelledby="adv-title">
+        <header class="panel-head">
+          <div>
+            <h2 id="adv-title">BGD e-GOV CIRT advisories</h2>
+            <p class="sub">Bangladesh's national CIRT. Their CVEs and indicators feed into Sentinel-BD.</p>
+          </div>
+        </header>
+        <ol class="adv-list" id="adv-list"></ol>
+      </aside>
+    </section>
+
+    <section class="panel ransom" aria-labelledby="ransom-title">
+      <header class="panel-head">
+        <div>
+          <h2 id="ransom-title">Ransomware</h2>
+          <p class="sub">Victims announced on ransomware gangs' leak sites over the last 90 days, from ransomware.live. Bangladesh and South Asia first. Victims are never blocklisted.</p>
+        </div>
+      </header>
+      <div class="ransom-body" id="ransom-body"></div>
+    </section>
+
     <section class="panel honeypot" aria-labelledby="honeypot-title">
       <header class="panel-head">
         <div>
@@ -175,7 +228,7 @@
             <div class="field">
               <span class="field-label">Block</span>
               <div class="seg" role="group" aria-label="Indicator type" id="builder-kind">
-                <button type="button" data-kind="ip">IPs</button>
+                <button type="button" data-kind="ip">IPs &amp; ranges</button>
                 <button type="button" data-kind="domain">Domains</button>
                 <button type="button" data-kind="url">URLs</button>
                 <button type="button" data-kind="hash">Hashes</button>

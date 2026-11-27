@@ -1,5 +1,6 @@
 """Registry of feed collectors. Add a new feed by subclassing Collector."""
 
+from sentinel.collectors.attackers import BlocklistDeCollector, CinsCollector, SpamhausDropCollector
 from sentinel.collectors.base import Collector, RawIndicator
 from sentinel.collectors.feodo import FeodoCollector
 from sentinel.collectors.openphish import OpenPhishCollector
@@ -13,6 +14,9 @@ COLLECTORS: dict[str, Collector] = {
         UrlhausCollector(),
         ThreatFoxCollector(),
         OpenPhishCollector(),
+        BlocklistDeCollector(),
+        CinsCollector(),
+        SpamhausDropCollector(),
     )
 }
 

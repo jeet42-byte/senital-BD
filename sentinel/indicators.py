@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 class IndicatorType(str, Enum):
     IPV4 = "ipv4"
+    CIDR = "cidr"      # an IPv4 network range, e.g. a hijacked block on Spamhaus DROP
     DOMAIN = "domain"
     URL = "url"
     MD5 = "md5"
@@ -60,6 +61,24 @@ def normalize_ipv4(value: str) -> str | None:
     if not ip.is_global:
         return None
     return str(ip)
+
+
+# Ranges broader than this are never accepted: one bad /6 would block a
+# continent.
+MIN_PREFIX = 8
+
+
+def normalize_cidr(value: str) -> str | None:
+    value = refang(value).strip()
+    try:
+        net = ipaddress.IPv4Network(value, strict=False)
+    except ValueError:
+        return None
+    if net.prefixlen < MIN_PREFIX:
+        return None
+    if not (net.network_address.is_global and net.broadcast_address.is_global):
+        return None
+    return str(net)
 
 
 def normalize_domain(value: str) -> str | None:
@@ -126,6 +145,8 @@ def normalize(kind: IndicatorType | str, value: str) -> str | None:
         return None
     if kind is IndicatorType.IPV4:
         return normalize_ipv4(value)
+    if kind is IndicatorType.CIDR:
+        return normalize_cidr(value)
     if kind is IndicatorType.DOMAIN:
         return normalize_domain(value)
     if kind is IndicatorType.URL:
@@ -136,6 +157,8 @@ def normalize(kind: IndicatorType | str, value: str) -> str | None:
 def guess_type(value: str) -> IndicatorType | None:
     """Best guess at what a user-supplied value is, for the lookup endpoint."""
     value = refang(value)
+    if re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}/\d{1,2}", value.strip()):
+        return IndicatorType.CIDR
     if "://" in value or "/" in value:
         return IndicatorType.URL
     if normalize_ipv4(value) or _looks_like_ip(value):

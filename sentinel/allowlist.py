@@ -88,3 +88,13 @@ def is_allowlisted_domain(domain: str) -> bool:
 
 def is_allowlisted_ip(ip: str) -> bool:
     return ip in ALLOWED_IPS
+
+
+def range_covers_allowlisted(cidr: str) -> bool:
+    import ipaddress
+
+    try:
+        net = ipaddress.IPv4Network(cidr, strict=False)
+    except ValueError:
+        return True  # unparseable: never export
+    return any(ipaddress.IPv4Address(ip) in net for ip in ALLOWED_IPS)

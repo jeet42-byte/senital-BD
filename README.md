@@ -164,6 +164,19 @@ so OpenCTI, MISP, Splunk, Elastic or Microsoft Sentinel can poll for what is new
 are exported as STIX `relationship` objects. The tests read the feed with the
 `taxii2-client` library, the same way those tools do.
 
+## Wider coverage: attackers, vulnerabilities, ransomware
+
+Beyond phishing and malware, Sentinel-BD tracks three more kinds of threat:
+
+| Area | Sources | What you get |
+|---|---|---|
+| **Attackers and scanners** | blocklist.de, CINS Army, Spamhaus DROP | Attacker IPs, plus whole hijacked networks as **IP ranges** in the blocklists. Looking up an IP also reports a listed range containing it. Ranges broader than /8 or covering public DNS resolvers are never accepted. |
+| **Exploited vulnerabilities** | CISA KEV, FIRST EPSS, BGD e-GOV CIRT | A "**patch these first**" list. Priority = 50 if exploited in the wild + 40 × EPSS + 10 if used by ransomware + 15 if named by Bangladesh's CIRT + 10 if newly exploited. CIRT advisories also contribute the indicators they publish defanged or as hashes. |
+| **Ransomware** | ransomware.live (public leak-site announcements) | The most active gangs, who is hit in **Bangladesh and South Asia**, by country and sector. Metadata only, and victims are never treated as indicators. |
+
+All run after each collection (`python -m sentinel.vulns`, `python -m sentinel.ransomware`), and
+each source's health appears in the dashboard's Pipeline panel.
+
 ## Quick start
 
 ```bash
@@ -205,6 +218,9 @@ python -m pytest -q
 | `GET /taxii2/` | TAXII 2.1 discovery (collections: all, Bangladesh) |
 | `GET /api/v1/graph?type=&value=` | An indicator's connections |
 | `GET /api/v1/correlations` | Links across sources |
+| `GET /api/v1/vulnerabilities?view=priority\|kev\|likely\|bd\|ransomware` | Exploited and likely-exploited CVEs, ranked |
+| `GET /api/v1/advisories` | BGD e-GOV CIRT advisories |
+| `GET /api/v1/ransomware?days=90` | Ransomware gangs and victims, South Asia first |
 | `GET /api/v1/explain?type=&value=` | Step-by-step score breakdown |
 | `GET /api/v1/feed-preview?kind=&min_score=&bd_only=` | Size of a feed before subscribing |
 | `GET /feeds/stix.json` | STIX 2.1 bundle |
@@ -252,6 +268,8 @@ deploy/           sensor VM kit: setup.sh, docker-compose.yml, systemd units
   ingest.py       pipeline + CLI
   exporters.py    plain text, RPZ, MikroTik, STIX 2.1 (with relationships)
   correlate.py    links between indicators (shared hosts, DNS)
+  vulns.py        CISA KEV, EPSS, BGD e-GOV CIRT advisories; priority ranking
+  ransomware.py   ransomware.live victims, South Asia focus
   api/            FastAPI app (dashboard, API, feeds) and taxii.py (TAXII 2.1)
   web/            dashboard: index.html + assets/app.js, app.css (no build step)
 tests/            tests with sample data from each feed
@@ -266,7 +284,8 @@ tests/            tests with sample data from each feed
 - [ ] More sensors: Dionaea (SMB/HTTP malware capture), a fake bKash login page
 - [x] **Phase 4, correlation:** shared hosts, DNS, honeypot downloads; connection graph and cross-source panel; TAXII 2.1 server
 - [x] **Dashboard:** lookup, threat pulse, impersonated brands, explorer, score breakdown, blocklist builder
-- [ ] More feeds: AlienVault OTX, CISA KEV, MalwareBazaar, PhishTank
+- [x] Wider scope: attacker and scanner feeds with IP ranges, exploited vulnerabilities (KEV, EPSS, BGD CIRT), ransomware victims
+- [ ] More feeds: AlienVault OTX, MalwareBazaar, PhishTank
 
 ## Ethics
 

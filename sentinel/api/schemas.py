@@ -67,6 +67,8 @@ class LookupResult(BaseModel):
     found: bool
     indicator: IndicatorOut | None = None
     explanation: ScoreExplanation | None = None
+    # For an IP: listed network ranges (e.g. Spamhaus DROP) that contain it.
+    ranges: list[IndicatorOut] = []
 
 
 class TimelinePoint(BaseModel):
@@ -130,9 +132,71 @@ class Correlation(BaseModel):
     own_sensor: bool
 
 
+class VulnerabilityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    cve_id: str
+    vendor: str | None
+    product: str | None
+    name: str | None
+    description: str | None
+    in_kev: bool
+    kev_added: datetime | None
+    kev_due: datetime | None
+    ransomware_use: bool
+    epss: float | None
+    epss_percentile: float | None
+    bd_advisories: int
+    priority: int
+    priority_parts: dict[str, int] = {}
+    indicator_count: int = 0
+
+
+class VulnerabilityPage(BaseModel):
+    total: int
+    kev_total: int
+    kev_last_30_days: int
+    ransomware_linked: int
+    in_bd_advisories: int
+    items: list[VulnerabilityOut]
+
+
+class AdvisoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    url: str
+    title: str
+    published: datetime | None
+    cves: list[str]
+    indicator_count: int
+
+
 class Ranked(BaseModel):
     value: str
     count: int
+
+
+class VictimOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    victim: str
+    group: str
+    country: str | None
+    sector: str | None
+    attack_date: datetime | None
+
+
+class RansomwareStats(BaseModel):
+    days: int
+    total: int
+    south_asia: int
+    bangladesh: int
+    groups: list[Ranked]               # most active gangs worldwide
+    south_asia_groups: list[Ranked]    # gangs hitting South Asia
+    countries: dict[str, int]          # South Asian country -> victims
+    sectors: list[Ranked]              # sectors hit in South Asia
+    recent: list[VictimOut]            # latest South Asian victims
+    last_update: datetime | None
 
 
 class HoneypotStats(BaseModel):

@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, noload, selectinload
 
 from sentinel import __version__
-from sentinel.allowlist import is_allowlisted_domain, is_allowlisted_ip
+from sentinel.allowlist import is_allowlisted_domain, is_allowlisted_ip, range_covers_allowlisted
 from sentinel.config import get_settings
 from sentinel.indicators import IndicatorType
 from sentinel.models import Indicator
@@ -58,6 +58,8 @@ def select_indicators(
             continue
         if indicator.type == IndicatorType.IPV4 and is_allowlisted_ip(indicator.value):
             continue
+        if indicator.type == IndicatorType.CIDR and range_covers_allowlisted(indicator.value):
+            continue
         rows.append(indicator)
         if len(rows) >= limit:
             break
@@ -85,7 +87,7 @@ def to_mikrotik(ips: Sequence[Indicator], list_name: str = "sentinel-bd") -> str
     lines += [
         f'/ip firewall address-list add list="{list_name}" address={i.value} timeout=1d'
         for i in ips
-        if i.type == IndicatorType.IPV4
+        if i.type in (IndicatorType.IPV4, IndicatorType.CIDR)
     ]
     return "\n".join(lines) + "\n"
 
@@ -119,6 +121,7 @@ def stix_pattern(kind: str, value: str) -> str:
     value = _stix_escape(value)
     return {
         IndicatorType.IPV4.value: f"[ipv4-addr:value = '{value}']",
+        IndicatorType.CIDR.value: f"[ipv4-addr:value = '{value}']",
         IndicatorType.DOMAIN.value: f"[domain-name:value = '{value}']",
         IndicatorType.URL.value: f"[url:value = '{value}']",
         IndicatorType.MD5.value: f"[file:hashes.MD5 = '{value}']",
@@ -217,7 +220,7 @@ def to_stix_bundle(indicators: Sequence[Indicator], now: datetime | None = None,
 
 
 FEED_TYPES: dict[str, tuple[IndicatorType, ...]] = {
-    "ip": (IndicatorType.IPV4,),
+    "ip": (IndicatorType.IPV4, IndicatorType.CIDR),
     "domain": (IndicatorType.DOMAIN,),
     "url": (IndicatorType.URL,),
     "hash": (IndicatorType.SHA256, IndicatorType.SHA1, IndicatorType.MD5),

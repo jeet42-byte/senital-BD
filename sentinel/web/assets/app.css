@@ -395,6 +395,80 @@ input[type="range"] { width: 100%; accent-color: var(--series); }
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* ---------- Section nav ---------- */
+.sections { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; flex: 1; justify-content: center; }
+.sections::-webkit-scrollbar { display: none; }
+.sections a {
+  color: var(--ink-2); text-decoration: none; font-size: 13px; padding: 6px 10px; border-radius: 8px; white-space: nowrap;
+}
+.sections a:hover { background: var(--surface); color: var(--ink); }
+html { scroll-padding-top: 80px; scroll-behavior: smooth; }
+
+/* ---------- Vulnerabilities ---------- */
+.row-vulns { grid-template-columns: minmax(0, 1fr) 360px; align-items: start; }
+.vuln-figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.vuln-figure { background: var(--page); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.vuln-figure .num { display: block; font-size: 22px; font-weight: 700; }
+.vuln-figure span:last-child { font-size: 12px; color: var(--muted); }
+.vuln-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.vuln {
+  background: var(--page); border: 1px solid var(--border); border-radius: 10px;
+}
+.vuln > button {
+  all: unset; box-sizing: border-box; cursor: pointer; width: 100%;
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px;
+}
+.vuln > button:focus-visible { outline: 2px solid var(--series); border-radius: 10px; }
+.vuln-prio { font: 700 18px var(--mono); text-align: center; border-radius: 8px; padding: 4px 0; }
+.prio-high { background: rgba(208, 59, 59, .18); color: #f19a9a; }
+.prio-medium { background: rgba(236, 131, 90, .16); color: #f2b293; }
+.prio-low { background: var(--surface-3); color: var(--ink-2); }
+.vuln-main { min-width: 0; }
+.vuln-id { font: 600 13px var(--mono); }
+.vuln-name { font-size: 13px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vuln-tags { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.tag-kev, .tag-rw, .tag-epss, .tag-cirt {
+  font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; border: 1px solid;
+}
+.tag-kev { color: #f19a9a; border-color: rgba(208, 59, 59, .5); }
+.tag-rw { color: #f2b293; border-color: rgba(236, 131, 90, .5); }
+.tag-epss { color: var(--ink-2); border-color: var(--border-strong); }
+.tag-cirt { color: #6fd1ab; border-color: rgba(111, 209, 171, .4); background: rgba(0, 106, 78, .2); }
+.vuln-detail { padding: 0 12px 12px 76px; font-size: 13px; color: var(--ink-2); display: grid; gap: 8px; }
+.vuln-detail p { margin: 0; }
+.vuln-parts { display: flex; gap: 6px; flex-wrap: wrap; }
+.vuln-parts span { font: 12px var(--mono); padding: 2px 8px; border-radius: 6px; background: var(--surface-3); }
+.adv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.adv-list li { border-top: 1px solid var(--grid); padding-top: 10px; }
+.adv-list li:first-child { border-top: 0; padding-top: 0; }
+.adv-title { font-size: 13.5px; font-weight: 600; }
+.adv-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+/* ---------- Ransomware ---------- */
+.ransom { margin-bottom: 20px; }
+.ransom-body { display: grid; grid-template-columns: 200px repeat(2, minmax(0, 1fr)); gap: 20px; }
+.ransom-wide { grid-column: 2 / -1; }
+.ransom-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ransom-table th { text-align: left; font-weight: 500; font-size: 12px; color: var(--muted); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); }
+.ransom-table td { padding: 7px 8px 7px 0; border-bottom: 1px solid var(--grid); }
+.ransom-table td:first-child { font-weight: 600; }
+.country-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.country-chips span { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); color: var(--ink-2); }
+.country-chips b { font-family: var(--mono); color: var(--ink); margin-left: 4px; }
+
+@media (max-width: 1180px) {
+  .row-vulns { grid-template-columns: 1fr; }
+  .sections { display: none; }
+}
+@media (max-width: 900px) {
+  .vuln-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ransom-body { grid-template-columns: 1fr; }
+  .ransom-wide { grid-column: auto; }
+  .vuln > button { grid-template-columns: 44px minmax(0, 1fr); }
+  .vuln-tags { grid-column: 1 / -1; justify-content: flex-start; }
+  .vuln-detail { padding-left: 12px; }
+}
+
 /* ---------- Honeypot ---------- */
 .honeypot { margin-bottom: 20px; }
 .hp-live { font-size: 12px; font-weight: 600; margin-left: 8px; }

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from sentinel.db import init_db, session_scope
 from sentinel.honeypot.cowrie import SOURCE, DailyStats, indicators_from_sessions, sessions_from_lines
@@ -102,16 +103,25 @@ def ship(log_dir: Path, state_file: Path) -> FeedRun:
     sessions = sessions_from_lines(lines)
     raws = indicators_from_sessions(sessions)
     started = datetime.now(timezone.utc)
-    with session_scope() as db:
-        run = FeedRun(source=SOURCE, started_at=started)
-        stats = ingest_raw(db, SOURCE, raws)
-        write_stats(db, DailyStats().add(sessions))
-        link_sessions(db, sessions)
-        run.fetched, run.rejected = stats.fetched, stats.rejected
-        run.created, run.updated = stats.created, stats.updated
-        run.ok = True
-        run.finished_at = datetime.now(timezone.utc)
-        db.add(run)
+    # The feed collector may insert the same attacker IP at the same moment;
+    # on a unique-constraint clash, re-read and try again.
+    for attempt in range(1, 4):
+        try:
+            with session_scope() as db:
+                run = FeedRun(source=SOURCE, started_at=started)
+                stats = ingest_raw(db, SOURCE, raws)
+                write_stats(db, DailyStats().add(sessions))
+                link_sessions(db, sessions)
+                run.fetched, run.rejected = stats.fetched, stats.rejected
+                run.created, run.updated = stats.created, stats.updated
+                run.ok = True
+                run.finished_at = datetime.now(timezone.utc)
+                db.add(run)
+            break
+        except IntegrityError:
+            if attempt == 3:
+                raise
+            log.warning("another writer stored the same indicator meanwhile; retrying")
     # Saved only after the database commit: a failed write is retried next run.
     state_file.parent.mkdir(parents=True, exist_ok=True)
     tmp = state_file.with_suffix(".tmp")

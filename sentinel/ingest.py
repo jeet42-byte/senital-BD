@@ -21,6 +21,7 @@ from pathlib import Path
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from sentinel.bd import bd_reasons
@@ -35,6 +36,7 @@ from sentinel.scoring import Evidence, as_utc, compute_score, severity
 log = logging.getLogger("sentinel.ingest")
 
 CHUNK = 500
+INSERT_ATTEMPTS = 3
 
 
 @dataclass
@@ -184,8 +186,10 @@ def run_collector(
     def describe(exc: Exception) -> str:
         if isinstance(exc, FeedError):
             return str(exc)  # already free of secrets; no traceback needed
-        message = collector.redact(f"{type(exc).__name__}: {exc}")
-        log.error("%s failed: %s", name, message, exc_info=True)
+        # First line only: database errors otherwise carry kilobytes of SQL.
+        first_line = (str(exc).splitlines() or [""])[0][:500]
+        message = collector.redact(f"{type(exc).__name__}: {first_line}")
+        log.error("%s failed: %s", name, message, exc_info=not isinstance(exc, IntegrityError))
         return message
 
     error: str | None = None
@@ -196,20 +200,39 @@ def run_collector(
         except Exception as exc:  # one broken feed must not stop the others
             error = describe(exc)
 
-    with session_scope() as session:
-        run = FeedRun(source=name, started_at=started)
-        if error is None:
+    raws: list[RawIndicator] = []
+    if error is None:
+        try:
+            raws = list(collector.parse(text))
+        except Exception as exc:
+            error = describe(exc)
+
+    stats: IngestStats | None = None
+    if error is None:
+        # Other writers (the honeypot shipper, the live hunter) can insert the
+        # same indicator between our lookup and our insert. The database's
+        # unique constraint stops the duplicate; re-reading and retrying
+        # then finds the row and updates it instead.
+        for attempt in range(1, INSERT_ATTEMPTS + 1):
             try:
-                stats = ingest_raw(session, name, collector.parse(text))
-                run.fetched, run.rejected = stats.fetched, stats.rejected
-                run.created, run.updated = stats.created, stats.updated
-                run.ok = True
+                with session_scope() as session:
+                    stats = ingest_raw(session, name, raws)
+                break
+            except IntegrityError as exc:
+                if attempt == INSERT_ATTEMPTS:
+                    error = describe(exc)
+                else:
+                    log.warning("%s: another writer stored the same indicator meanwhile; retrying", name)
             except Exception as exc:
-                session.rollback()
-                run = FeedRun(source=name, started_at=started)
                 error = describe(exc)
-        run.error = error[:2000] if error else None
-        run.finished_at = datetime.now(timezone.utc)
+                break
+
+    with session_scope() as session:
+        run = FeedRun(source=name, started_at=started, ok=error is None,
+                      error=error[:2000] if error else None, finished_at=datetime.now(timezone.utc))
+        if stats:
+            run.fetched, run.rejected = stats.fetched, stats.rejected
+            run.created, run.updated = stats.created, stats.updated
         session.add(run)
     log.info(
         "%-13s ok=%s fetched=%d rejected=%d new=%d updated=%d %s",

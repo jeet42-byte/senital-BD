@@ -89,3 +89,42 @@ def test_run_collector_records_failures_without_raising():
     assert run.ok and run.created == 4
     with session_scope() as session:
         assert len(session.scalars(select(FeedRun)).all()) == 2
+
+
+def test_a_clash_with_another_writer_is_retried(monkeypatch):
+    """The honeypot shipper can insert the same IP between our lookup and
+    our insert; the collector must retry, not fail the whole feed."""
+    import sentinel.ingest as ingest_module
+    from sentinel.collectors.base import RawIndicator
+    from sentinel.indicators import IndicatorType
+
+    real_load = ingest_module._load_existing
+    lookups = []
+
+    def lookup_then_someone_else_inserts(session, keys):
+        found = real_load(session, keys)
+        lookups.append(len(found))
+        if len(lookups) == 1:  # the other writer slips in right after our first lookup
+            with session_scope() as other:
+                ingest_module.ingest_raw(other, "honeypot", [
+                    RawIndicator(IndicatorType.IPV4, "185.220.101.45", "honeypot", confidence=60)])
+        return found
+
+    monkeypatch.setattr(ingest_module, "_load_existing", lookup_then_someone_else_inserts)
+    run = run_collector("feodotracker", text=fixture_text("feodo.json"))
+    assert run.ok, run.error
+    assert lookups[0] == 0 and lookups[-1] >= 1  # second attempt found the row
+    with session_scope() as session:
+        ip = session.scalar(select(Indicator).where(Indicator.value == "185.220.101.45"))
+        assert {s.source for s in ip.sightings} == {"honeypot", "feodotracker"}
+
+
+def test_database_errors_are_stored_as_one_line(monkeypatch):
+    import sentinel.ingest as ingest_module
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("first line\n" + "SQL " * 5000)
+
+    monkeypatch.setattr(ingest_module, "ingest_raw", boom)
+    run = run_collector("openphish", text=fixture_text("openphish.txt"))
+    assert not run.ok and run.error == "RuntimeError: first line"

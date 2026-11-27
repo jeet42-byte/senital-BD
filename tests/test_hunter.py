@@ -183,7 +183,7 @@ def test_slow_fetch_holds_no_database_transaction(monkeypatch):
 
     monkeypatch.setattr("sentinel.ingest.session_scope", watched_scope)
     run = run_collector(SlowHunter(), client=object())
-    assert run.ok and events == ["fetch", "session"]
+    assert run.ok and events[0] == "fetch" and set(events[1:]) == {"session"}
 
 
 @pytest.mark.parametrize("name", ["hojatkashfi2.workers.dev", "primebaskets.store", "mytkash.com", "sonalibanker.org"])
